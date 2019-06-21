@@ -166,7 +166,7 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
     for symbol, trade_list in trade_dic.items():
         # Go to last transaction that is a closing position
         reversed_trade_list = reversed(trade_list)
-        for closing_trade in reversed_trade_list:
+        for closing_trade in trade_list:
             # opening_shares_list is list of tuples (TradeClose, TradeOpen, num_of_shares)
             # summing num_of_shares of all these tuples will equal to closing_trade.
             # In all tuples in the list, TradeClose will be the same
@@ -180,6 +180,9 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
                 # Those will be the shares closing the
                 for opening_trade in trade_list:
                     if type(opening_trade) is TradeOpen:
+                        # If no shares left in opening trade - skip to next trade
+                        if opening_trade.shares_left == 0:
+                            continue
                         covered = 0
                         # If opening trade shares cover all closing trade shares
                         if opening_trade.shares_left + closing_trade.shares_left >= 0:

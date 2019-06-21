@@ -1,6 +1,8 @@
 from src.tax_generator import form1325_list_create, print_form1325_list
 from src.tax_generator import TradeOpen, TradeClose
-from datetime import date
+from datetime import date, timedelta
+from itertools import count
+
 import texttable as tt
 import pytest
 
@@ -156,3 +158,69 @@ def test_laradar_example(open_rate, close_rate, open_price_usd, close_price_usd,
     check_expected_profit_loss(expected['profit_loss'], form1325_list[0].profit_loss)
     check_entries_math(form1325_list)
     #assert False
+
+
+class TradeTest:
+    _ids = count(0)
+    def __init__(self, trade, rate):
+        self.trade = trade
+        self.rate = rate
+        self.trade.date = date(2020, 1, 1) + timedelta(days=next(self._ids))
+
+
+@pytest.mark.parametrize('test_trade_list_dic', [
+    {
+        'test_trade_list' : [
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=151.92, date=None, total_shares_num=1, shares_left=1), 3.558),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(144.26), date=None, total_shares_num=-1, shares_left=-1),3.568),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=151.92, date=None, total_shares_num=1, shares_left=1), 3.558),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(144.26), date=None, total_shares_num=-1, shares_left=-1), 3.568)
+        ],
+        'expected_profit_loss' : [-25.81, -25.81]
+    },
+    {
+        'test_trade_list' : [
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, date=None, total_shares_num=1, shares_left=1), 5),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(150), date=None, total_shares_num=-1, shares_left=-1),7),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, date=None, total_shares_num=1, shares_left=1), 5),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(200), date=None, total_shares_num=-1, shares_left=-1),3),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, date=None, total_shares_num=1, shares_left=1), 5),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(50), date=None, total_shares_num=-1, shares_left=-1),11),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, date=None, total_shares_num=1, shares_left=1), 5),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(50), date=None, total_shares_num=-1, shares_left=-1),7),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, date=None, total_shares_num=1, shares_left=1), 5),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(50), date=None, total_shares_num=-1, shares_left=-1),3),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, date=None, total_shares_num=1, shares_left=1), 5),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(150), date=None, total_shares_num=-1, shares_left=-1),3)
+        ],
+        'expected_profit_loss' : [350, 100, 0, -150, -350, 0]
+    }
+])
+def test_multiple_buy_sell_simple(test_trade_list_dic):
+    '''
+    Buy a stock, sell all the shares, then buy the same stock again,
+    and sell all the shares
+    '''
+    dollar_ils_rate = {}
+
+
+    trade_dic = {}
+    for test_trade in test_trade_list_dic['test_trade_list']:
+        dollar_ils_rate[test_trade.trade.date] = test_trade.rate
+        if test_trade.trade.symbol in trade_dic:
+            trade_dic[test_trade.trade.symbol].append(test_trade.trade)
+        else:
+            trade_dic[test_trade.trade.symbol] = [test_trade.trade]
+    print(trade_dic)
+
+    form1325_list = form1325_list_create(trade_dic, dollar_ils_rate)
+    print_form1325_list(form1325_list)
+
+    assert len(form1325_list) == len(test_trade_list_dic['expected_profit_loss'])
+
+    idx = 0
+    for entry in form1325_list:
+        check_expected_profit_loss(test_trade_list_dic['expected_profit_loss'][idx], entry.profit_loss)
+        idx += 1
+
+    check_entries_math(form1325_list)
