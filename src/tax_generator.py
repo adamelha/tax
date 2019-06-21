@@ -3,7 +3,7 @@ from xlrd import xldate
 import csv
 import io
 import datetime
-
+import texttable as tt
 
 IB_ACTIVITY_STATEMENT_CSV = 'test.csv'
 BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS = 'ExchangeRates.xlsx'
@@ -44,16 +44,21 @@ class Trade():
     def __str__(self):
         return 'Trade: symbol:{}, date:{} comm:{}, price:{}'.format(self.symbol, self.date, self.commision, self.transaction_price)
 class TradeOpen(Trade):
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
+        for key, value in kwargs.items():  # kwargs is a regular dictionary
+            setattr(self, key, value)
     def __repr__(self):
         return self.__str__()
 
 class TradeClose(Trade):
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
         self.realized = 0.0
         self.shares_covered = 0
+        for key, value in kwargs.items():  # kwargs is a regular dictionary
+            setattr(self, key, value)
+
     def __str__(self):
         return '{}, realized:{}'.format(super().__str__(), self.realized)
     def __repr__(self):
@@ -139,6 +144,12 @@ class Form1325Entry():
                '{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(self.symbol, self.sale_value_usd, self.purchase_date, self.orig_price_ils, self.usd_sale_to_purchase_rate, self.adjusted_price, self.sale_date, self.sale_value, self.profit_loss)
     def __repr__(self):
         return self.__str__()
+    def to_list(self):
+        return [self.symbol, self.sale_value_usd, self.purchase_date, self.orig_price_ils, self.usd_sale_to_purchase_rate, self.adjusted_price, self.sale_date, self.sale_value, self.profit_loss]
+
+    @staticmethod
+    def to_header_list():
+        return ['symbol', 'sale_value_usd', 'purchase_date', 'orig_price_ils', 'usd_sale_to_purchase_rate', 'adjusted_price', 'sale_date', 'sale_value', 'profit_loss']
 
 
 def form1325_list_create(trade_dic, dollar_ils_rate):
@@ -194,6 +205,7 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
     entries = []
     # Now opening_shares_lists_for_all_symbols is populated
     for list_of_tuples_for_symbol in opening_shares_lists_for_all_symbols:
+        print (list_of_tuples_for_symbol)
         # If only one opening trade needed to cover closing trade - easy
         if len(list_of_tuples_for_symbol) == 1:
             tup = list_of_tuples_for_symbol[0]
@@ -218,6 +230,7 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
             buy_date = exchange_dates[1]
             form_entry.symbol = tup[0].symbol
             form_entry.sale_value_usd = tup[0].transaction_price * tup[2]
+            print(tup[0].transaction_price)
             form_entry.purchase_date = tup[1].date
             form_entry.orig_price_ils = tup[1].transaction_price * tup[2] * dollar_ils_rate[buy_date]
 
@@ -237,7 +250,8 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
 
             form_entry.adjusted_price = form_entry.usd_sale_to_purchase_rate * form_entry.orig_price_ils
             form_entry.sale_date = sell_date
-            form_entry.sale_value = (tup[0].transaction_price * tup[2]) * dollar_ils_rate[buy_date]
+            #print(f'{tup[0].transaction_price} * {tup[2]}) * {dollar_ils_rate[buy_date]}')
+            form_entry.sale_value = (tup[0].transaction_price * tup[2]) * dollar_ils_rate[sell_date]
             form_entry.profit_loss = form_entry.sale_value - form_entry.adjusted_price
             entries.append(form_entry)
         else:
@@ -247,14 +261,23 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
 def sum_profit_loss(form1325_list):
     return sum([entry.profit_loss for entry in form1325_list])
 
+def print_form1325_list(form1325_list):
+    tab = tt.Texttable()
+    tab.header(Form1325Entry.to_header_list())
+
+    for entry in form1325_list:
+        #for row in zip(entry.to_list()):
+        tab.add_row(entry.to_list())
+        s = tab.draw()
+    print(s)
+
+
 def main():
     dollar_ils_rate = dollar_ils_rate_parse()
     trade_dic = trades_parse()
     print(trade_dic)
     form1325_list = form1325_list_create(trade_dic, dollar_ils_rate)
-    for entry in form1325_list:
-        print(entry)
-    print('Total profit/loss: {}'.format(sum_profit_loss(form1325_list)))
+    print_form1325_list(form1325_list)
 
 if __name__ == "__main__":
 
