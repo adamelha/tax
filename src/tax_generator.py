@@ -233,26 +233,49 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
             print(tup[0].transaction_price)
             form_entry.purchase_date = tup[1].date
             form_entry.orig_price_ils = tup[1].transaction_price * tup[2] * dollar_ils_rate[buy_date]
-
+            form_entry.sale_value = (tup[0].transaction_price * tup[2]) * dollar_ils_rate[sell_date]
             rate = dollar_ils_rate[sell_date] / dollar_ils_rate[buy_date]
 
             # https://fintranslator.com/israel-tax-schedules-passive-income-foreign-broker/
             # writes to do this: if madad has gone down in profit we, disregard it
             # and if madad has gone up in profit we, disregard it
-            if tup[0].realized <= 0 and rate > 1:
-                form_entry.usd_sale_to_purchase_rate = rate
-            elif tup[0].realized <= 0 and rate <= 1:
-                form_entry.usd_sale_to_purchase_rate = 1
-            elif tup[0].realized > 0 and rate > 1:
-                form_entry.usd_sale_to_purchase_rate = rate
-            elif tup[0].realized > 0 and rate <= 1:
-                form_entry.usd_sale_to_purchase_rate = 1
 
-            form_entry.adjusted_price = form_entry.usd_sale_to_purchase_rate * form_entry.orig_price_ils
+            # Define the 'realized' as the difference between purchase (ILS that day) and orig price (ILS that day)
+            tup[0].realized = form_entry.sale_value - form_entry.orig_price_ils
+            # if tup[0].realized <= 0 and rate > 1:
+            #     form_entry.usd_sale_to_purchase_rate = rate
+            # elif tup[0].realized <= 0 and rate <= 1:
+            #     form_entry.usd_sale_to_purchase_rate = 1
+            # elif tup[0].realized > 0 and rate > 1:
+            #     form_entry.usd_sale_to_purchase_rate = rate
+            # elif tup[0].realized > 0 and rate <= 1:
+            #     form_entry.usd_sale_to_purchase_rate = 1
             form_entry.sale_date = sell_date
+            realized = tup[0].realized # hon nominali
+            inflation = form_entry.orig_price_ils * (rate - 1)
+
+            # Different signs
+            if inflation * realized < 0:
+                form_entry.profit_loss = realized
+            else: # Same sign
+                form_entry.profit_loss = realized - inflation
+
+                # If inflation causes a sign change - leave the profit at 0
+                if realized * form_entry.profit_loss < 0:
+                    form_entry.profit_loss = 0
+
+            # form_entry.profit_loss = form_entry.sale_value - form_entry.adjusted_price =>
+            form_entry.adjusted_price = form_entry.sale_value - form_entry.profit_loss
+            form_entry.usd_sale_to_purchase_rate = form_entry.adjusted_price / form_entry.orig_price_ils
+
+
+
+
+            #form_entry.adjusted_price = form_entry.usd_sale_to_purchase_rate * form_entry.orig_price_ils
+            #form_entry.sale_date = sell_date
             #print(f'{tup[0].transaction_price} * {tup[2]}) * {dollar_ils_rate[buy_date]}')
-            form_entry.sale_value = (tup[0].transaction_price * tup[2]) * dollar_ils_rate[sell_date]
-            form_entry.profit_loss = form_entry.sale_value - form_entry.adjusted_price
+
+            #form_entry.profit_loss = form_entry.sale_value - form_entry.adjusted_price
             entries.append(form_entry)
         else:
             raise Exception('Closing trade for {} covers more than one opening trade. This is not yet supported.'.format(list_of_tuples_for_symbol[0][0].symbol))
