@@ -6,6 +6,24 @@ import pytest
 
 ALLOWED_ERROR_MARGIN = 0.01
 
+def check_entries_math(form1325_list):
+    '''
+    Sanity check that the fields of the table add up as instructed in the form
+    :param form1325_list:
+    :return void
+    '''
+    for entry in form1325_list:
+        assert entry.orig_price_ils * entry.usd_sale_to_purchase_rate == pytest.approx(entry.adjusted_price, ALLOWED_ERROR_MARGIN)
+        if entry.profit_loss >= 0:
+            assert entry.sale_value - entry.adjusted_price == pytest.approx(entry.profit_loss, ALLOWED_ERROR_MARGIN)
+        else:
+            # In loss - we do not care inflation - only nominal
+            assert entry.orig_price_ils - entry.sale_value == pytest.approx(-entry.profit_loss, ALLOWED_ERROR_MARGIN)
+
+
+def check_expected_profit_loss(expected, actual):
+    assert expected == pytest.approx(actual, ALLOWED_ERROR_MARGIN)
+
 '''
 The trades will be held in the following data structure:
 {
@@ -24,7 +42,11 @@ The trades will be held in the following data structure:
 }
 '''
 
+#
 def test_loss_positive_rate_change():
+    '''
+    from example here: https://fintranslator.com/israel-tax-schedules-passive-income-foreign-broker/
+    '''
     dollar_ils_rate = {}
     open_date = date(2020, 1, 1)
     close_date = date(2020, 1, 2)
@@ -32,9 +54,7 @@ def test_loss_positive_rate_change():
     dollar_ils_rate[open_date] = 3.558
     dollar_ils_rate[close_date] = 3.568
 
-    # print(dollar_ils_rate)
-    print('bla!')
-
+    expected_profit_loss = -25.81
     trade_dic = {
         'TEST' : [
             TradeOpen(symbol='TEST', transaction_price=151.92, date=open_date, total_shares_num=1, shares_left=1),
@@ -43,17 +63,24 @@ def test_loss_positive_rate_change():
     }
 
     form1325_list = form1325_list_create(trade_dic, dollar_ils_rate)
-
     print_form1325_list(form1325_list)
-    assert False
+
+    check_expected_profit_loss(expected_profit_loss, form1325_list[0].profit_loss)
+    check_entries_math(form1325_list)
+    #assert False
 
 def test_profit_positive_rate_change():
+    '''
+    from example here: https://fintranslator.com/israel-tax-schedules-passive-income-foreign-broker/
+    '''
     dollar_ils_rate = {}
     open_date = date(2020, 1, 1)
     close_date = date(2020, 1, 2)
 
     dollar_ils_rate[open_date] = 3.818
     dollar_ils_rate[close_date] = 3.512
+
+    expected_profit_loss = 33.99
 
     # print(dollar_ils_rate)
     print('bla!')
@@ -66,9 +93,10 @@ def test_profit_positive_rate_change():
     }
 
     form1325_list = form1325_list_create(trade_dic, dollar_ils_rate)
-
     print_form1325_list(form1325_list)
-    assert False
+    check_expected_profit_loss(expected_profit_loss, form1325_list[0].profit_loss)
+    check_entries_math(form1325_list)
+    #assert False
 
 ladar_testdata = [
     (5, 7, 100, 150, 1, -1,
@@ -89,28 +117,17 @@ ladar_testdata = [
      }),
     (5, 3, 100, 50, 1, -1,
      {
-         'profit_loss' : -150
+         # In the actual data we are given -150 as the real loss
+         # However, since this is a loss, we do not need the real,
+         # but the nominal, so changed it to -350 which is the nominal
+         # loss
+         'profit_loss' : -350
      }),
     (5, 3, 100, 150, 1, -1,
      {
          'profit_loss' : 0
      })
 ]
-
-def check_entries_math(form1325_list):
-    '''
-    Sanity check that the fields of the table add up as instructed in the form
-    :param form1325_list:
-    :return void
-    '''
-    for entry in form1325_list:
-        assert entry.orig_price_ils * entry.usd_sale_to_purchase_rate == pytest.approx(entry.adjusted_price, ALLOWED_ERROR_MARGIN)
-        if entry.profit_loss >= 0:
-            assert entry.sale_value - entry.adjusted_price == pytest.approx(entry.profit_loss, ALLOWED_ERROR_MARGIN)
-        else:
-            # Not sure why this is the case why is the calculation different??
-            assert entry.orig_price_ils - entry.sale_value == pytest.approx(-entry.profit_loss, ALLOWED_ERROR_MARGIN)
-
 
 @pytest.mark.parametrize("open_rate, close_rate, open_price_usd, close_price_usd, shares_num_open, shares_num_close, expected", ladar_testdata)
 def test_laradar_example(open_rate, close_rate, open_price_usd, close_price_usd, shares_num_open, shares_num_close, expected):
@@ -136,6 +153,6 @@ def test_laradar_example(open_rate, close_rate, open_price_usd, close_price_usd,
 
     form1325_list = form1325_list_create(trade_dic, dollar_ils_rate)
     print_form1325_list(form1325_list)
-    assert expected['profit_loss'] == pytest.approx(form1325_list[0].profit_loss, ALLOWED_ERROR_MARGIN)
+    check_expected_profit_loss(expected['profit_loss'], form1325_list[0].profit_loss)
     check_entries_math(form1325_list)
     #assert False

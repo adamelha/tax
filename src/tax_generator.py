@@ -264,6 +264,10 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
                 if realized * form_entry.profit_loss < 0:
                     form_entry.profit_loss = 0
 
+            # If loss - disregard inflation
+            if form_entry.profit_loss < 0:
+                form_entry.profit_loss = realized
+
             # form_entry.profit_loss = form_entry.sale_value - form_entry.adjusted_price =>
             form_entry.adjusted_price = form_entry.sale_value - form_entry.profit_loss
             form_entry.usd_sale_to_purchase_rate = form_entry.adjusted_price / form_entry.orig_price_ils
