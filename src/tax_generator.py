@@ -129,6 +129,47 @@ def trades_parse():
 
     return dic
 
+class Dividend():
+    def __init__(self):
+        self.symbol = ''
+        self.date = None
+        self.value_usd = 0
+
+'''
+The dividends will be held in the following stucture:
+[
+    Dividend1,
+    Dividend2,
+    ...
+    Dividendn,
+]
+'''
+def dividends_parse():
+    dividend_list = []
+    with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
+        id = []
+        for ln in ib_csv_file:
+            if ln.startswith("Dividends,"):
+                id.append(ln)
+
+        s = '\n'.join(id)
+
+        csv_reader = csv.DictReader(io.StringIO(s))
+
+        for row in csv_reader:
+            # If end of dividends
+            if row['Currency'] == 'Total':
+                break
+
+            dividend = Dividend()
+            dividend.symbol = row['Description'].split('(')[0]
+            # row['Date/Time'] looks like this 2019-04-22
+            dividend.date = datetime.datetime.strptime(row['Date'], '%Y-%m-%d')
+            dividend.value_usd = float(row['Amount'])
+            dividend_list.append(dividend)
+
+    return dividend_list
+
 class Form1325Entry():
     def __init__(self):
         self.symbol = ''
@@ -296,26 +337,72 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
             entries.append(form_entry)
     return entries
 
+
+class Form1322AppendixEntry():
+    def __init__(self, dividend):
+        self.symbol = dividend.symbol
+        self.date = dividend.date
+        self.value_usd = dividend.value_usd
+        self.rate = 0
+        self.value_ils = 0
+
+    def populate(self, dollar_ils_rate):
+        self.rate = dollar_ils_rate[self.date]
+        self.value_ils = self.value_usd * self.rate
+    @staticmethod
+    def to_header_list():
+        return ['symbol', 'date', 'value_usd', 'rate', 'value_ils']
+    def to_list(self):
+        return [self.symbol, self.date, self.value_usd, self.rate, self.value_ils]
+
+def form1322_appendix_list_create(dividends_list, dollar_ils_rate):
+    lst = []
+    for div in dividends_list:
+        entry = Form1322AppendixEntry(div)
+        entry.populate(dollar_ils_rate)
+        lst.append(entry)
+    return lst
+
 def sum_profit_loss(form1325_list):
     return sum([entry.profit_loss for entry in form1325_list])
 
 def print_form1325_list(form1325_list):
     tab = tt.Texttable()
     tab.header(Form1325Entry.to_header_list())
-
+    print('\nForm 1325 appendix 3 (nispah gimmel):')
     for entry in form1325_list:
         #for row in zip(entry.to_list()):
         tab.add_row(entry.to_list())
         s = tab.draw()
     print(s)
+    total_profits = sum([entry.profit_loss for entry in form1325_list if entry.profit_loss >= 0])
+    total_losses = sum([entry.profit_loss for entry in form1325_list if entry.profit_loss < 0])
+    total_sales = sum([entry.sale_value for entry in form1325_list])
+    print(f'Total profits: {total_profits}\tTotal losses: {total_losses}')
+    print(f'Total sales {total_sales}')
 
 
+def print_form1322_appendix_list(dividends_list):
+    tab = tt.Texttable()
+    tab.header(Form1322AppendixEntry.to_header_list())
+    print('\nForm 1322 appendix:')
+    for div in dividends_list:
+        # for row in zip(entry.to_list()):
+        tab.add_row(div.to_list())
+        s = tab.draw()
+    print(s)
+    total_usd = sum([div.value_usd for div in dividends_list])
+    total_ils = sum([div.value_ils for div in dividends_list])
+    print(f'total_usd: {total_usd}\ttotal_ils: {total_ils}')
 def main():
     dollar_ils_rate = dollar_ils_rate_parse()
     trade_dic = trades_parse()
-    print(trade_dic)
+    dividends_list = dividends_parse()
+    #print(trade_dic)
     form1325_list = form1325_list_create(trade_dic, dollar_ils_rate)
+    form1322_appendix_list = form1322_appendix_list_create(dividends_list, dollar_ils_rate)
     print_form1325_list(form1325_list)
+    print_form1322_appendix_list(form1322_appendix_list)
 
 if __name__ == "__main__":
 
