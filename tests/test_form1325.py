@@ -130,8 +130,17 @@ ladar_testdata = [
          'profit_loss' : 0
      })
 ]
+ladar_testdata_test_case_names = [
+    'nominal profit, inflation profit',
+    'nominal profit, inflation loss',
+    'nominal profit zeroed by inflation profit',
+    'nominal loss, inflation profit',
+    'nominal loss, inflation loss',
+    'nominal loss zeroed by inflation loss'
 
-@pytest.mark.parametrize("open_rate, close_rate, open_price_usd, close_price_usd, shares_num_open, shares_num_close, expected", ladar_testdata)
+]
+
+@pytest.mark.parametrize("open_rate, close_rate, open_price_usd, close_price_usd, shares_num_open, shares_num_close, expected", ladar_testdata, ids=ladar_testdata_test_case_names)
 def test_laradar_example(open_rate, close_rate, open_price_usd, close_price_usd, shares_num_open, shares_num_close, expected):
     '''
     Check the algorithm agains the example from here: http://laradar.com/?p=304#
@@ -168,8 +177,9 @@ class TradeTest:
         self.trade.date = date(2020, 1, 1) + timedelta(days=next(self._ids))
 
 
-@pytest.mark.parametrize('test_trade_list_dic', [
+test_params_generic = [
     {
+        'test_name' : 'Simple: buy1,trade1,buy1,trade1',
         'test_trade_list' : [
             TradeTest(TradeOpen(symbol='TEST', transaction_price=151.92, date=None, total_shares_num=1, shares_left=1), 3.558),
             TradeTest(TradeClose(symbol='TEST', transaction_price=(144.26), date=None, total_shares_num=-1, shares_left=-1),3.568),
@@ -179,6 +189,7 @@ class TradeTest:
         'expected_profit_loss' : [-25.81, -25.81]
     },
     {
+        'test_name' : 'Simple: buy1, trade1... complete laradar_example',
         'test_trade_list' : [
             TradeTest(TradeOpen(symbol='TEST', transaction_price=100, date=None, total_shares_num=1, shares_left=1), 5),
             TradeTest(TradeClose(symbol='TEST', transaction_price=(150), date=None, total_shares_num=-1, shares_left=-1),7),
@@ -194,9 +205,32 @@ class TradeTest:
             TradeTest(TradeClose(symbol='TEST', transaction_price=(150), date=None, total_shares_num=-1, shares_left=-1),3)
         ],
         'expected_profit_loss' : [350, 100, 0, -150, -350, 0]
+    },
+    {
+        'test_name' : 'buy3, sell 1, sell 1',
+        'test_trade_list' : [
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=151.92, date=None, total_shares_num=3, shares_left=3), 3.558),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(144.26), date=None, total_shares_num=-1, shares_left=-1),3.568),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=(144.26), date=None, total_shares_num=-1, shares_left=-1), 3.568)
+        ],
+        'expected_profit_loss' : [-25.81, -25.81]
+    },
+    {
+        # ADAM: my calculation, hopefully is correct
+        'test_name' : 'Sell from 2 different opens at once',
+        'test_trade_list' : [
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, total_shares_num=5, shares_left=5), 5),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=120, total_shares_num=10, shares_left=10), 7),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=130, total_shares_num=-15, shares_left=-15), 8)
+        ],
+        'expected_profit_loss' : [1200, 800]
     }
-])
-def test_multiple_buy_sell_simple(test_trade_list_dic):
+]
+
+test_params_generic_test_names = [params['test_name'] for params in test_params_generic ]
+
+@pytest.mark.parametrize('test_trade_list_dic', test_params_generic, ids=test_params_generic_test_names)
+def test_multiple_buy_sell(test_trade_list_dic):
     '''
     Buy a stock, sell all the shares, then buy the same stock again,
     and sell all the shares

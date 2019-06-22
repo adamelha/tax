@@ -209,9 +209,12 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
     # Now opening_shares_lists_for_all_symbols is populated
     for list_of_tuples_for_symbol in opening_shares_lists_for_all_symbols:
         print (list_of_tuples_for_symbol)
-        # If only one opening trade needed to cover closing trade - easy
-        if len(list_of_tuples_for_symbol) == 1:
-            tup = list_of_tuples_for_symbol[0]
+        # If len(list_of_tuples_for_symbol) > 1: this means one sale covers
+        # multiple buys, and sale is split to 2 entries, one for each buy
+        for tup in list_of_tuples_for_symbol:
+
+            tup[0].commision = 1
+
             form_entry = Form1325Entry()
             # tup[0] is the TradeClose object
             # tup[1] is TradeOpen object
@@ -284,8 +287,6 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
 
             #form_entry.profit_loss = form_entry.sale_value - form_entry.adjusted_price
             entries.append(form_entry)
-        else:
-            raise Exception('Closing trade for {} covers more than one opening trade. This is not yet supported.'.format(list_of_tuples_for_symbol[0][0].symbol))
     return entries
 
 def sum_profit_loss(form1325_list):
