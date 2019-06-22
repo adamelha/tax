@@ -253,7 +253,26 @@ test_params_generic = [
             TradeTest(TradeClose(symbol='TEST1', transaction_price=70, total_shares_num=-12, shares_left=-12), 9)
         ],
         'expected_profit_loss' : [1200, 560, -630, -1530] * 2
-    }
+    },
+    {
+        # ADAM: my calculation, hopefully is correct
+        'test_name' : 'Commissions simple test',
+        'test_trade_list' : [
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, total_shares_num=1, shares_left=1, commission=20), 10),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=200, total_shares_num=-1, shares_left=-1, commission=20), 10)
+        ],
+        'expected_profit_loss' : [600]
+    },
+    {
+        # ADAM: my calculation, hopefully is correct
+        'test_name' : 'Commissions test with close split',
+        'test_trade_list' : [
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, total_shares_num=1, shares_left=1, commission=20), 10),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, total_shares_num=1, shares_left=1, commission=20), 10),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=200, total_shares_num=-2, shares_left=-2, commission=20), 10)
+        ],
+        'expected_profit_loss' : [600, 800]
+    },
 ]
 
 test_params_generic_test_names = [params['test_name'] for params in test_params_generic ]

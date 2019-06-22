@@ -36,13 +36,13 @@ def dollar_ils_rate_parse():
 class Trade():
     def __init__(self):
         self.symbol = ''
-        self.commision = 0
+        self.commission = 0
         self.transaction_price = 0
         self.date = None
         self.total_shares_num = 0
         self.shares_left = 0
     def __str__(self):
-        return 'Trade: symbol:{}, date:{} comm:{}, price:{}'.format(self.symbol, self.date, self.commision, self.transaction_price)
+        return 'Trade: symbol:{}, date:{} comm:{}, price:{}'.format(self.symbol, self.date, self.commission, self.transaction_price)
 class TradeOpen(Trade):
     def __init__(self, **kwargs):
         super().__init__()
@@ -110,7 +110,9 @@ def trades_parse():
                 continue
 
             trade.symbol = row['Symbol']
-            trade.commision = float(row['Comm/Fee'])
+            # Commssion is represented by a negative number - store it as positive
+            # because we later add it to the original price
+            trade.commission = abs(float(row['Comm/Fee']))
             trade.transaction_price = float(row['T. Price'])
             # row['Date/Time'] looks like this 2019-04-22, 14:04:29
             # We discard the part after the comma so the time is 0, as with the USD/ILS exchange file
@@ -236,6 +238,14 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
             print(tup[0].transaction_price)
             form_entry.purchase_date = tup[1].date
             form_entry.orig_price_ils = tup[1].transaction_price * tup[2] * dollar_ils_rate[buy_date]
+            form_entry.orig_price_ils += (tup[0].commission * dollar_ils_rate[sell_date] + tup[1].commission * dollar_ils_rate[buy_date])
+
+            # zero out the commissions so that we do not use them for other entries envolving this trade.
+            # For instance buy 1, buy 1, sell 2: we split the sell trade to 2 entries, so we make sure
+            # we only add the commission to the price once
+            tup[0].commission = 0
+            tup[1].commission = 0
+
             form_entry.sale_value = (tup[0].transaction_price * tup[2]) * dollar_ils_rate[sell_date]
             rate = dollar_ils_rate[sell_date] / dollar_ils_rate[buy_date]
 
