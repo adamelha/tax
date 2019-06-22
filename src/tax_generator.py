@@ -212,9 +212,6 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
         # If len(list_of_tuples_for_symbol) > 1: this means one sale covers
         # multiple buys, and sale is split to 2 entries, one for each buy
         for tup in list_of_tuples_for_symbol:
-
-            tup[0].commision = 1
-
             form_entry = Form1325Entry()
             # tup[0] is the TradeClose object
             # tup[1] is TradeOpen object
