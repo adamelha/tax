@@ -6,7 +6,7 @@ from itertools import count
 import texttable as tt
 import pytest
 
-ALLOWED_ERROR_MARGIN = 0.01
+ALLOWED_ERROR_MARGIN = 0.001
 
 def check_entries_math(form1325_list):
     '''
@@ -224,6 +224,35 @@ test_params_generic = [
             TradeTest(TradeClose(symbol='TEST', transaction_price=130, total_shares_num=-15, shares_left=-15), 8)
         ],
         'expected_profit_loss' : [1200, 800]
+    },
+    {
+        # ADAM: my calculation, hopefully is correct
+        'test_name' : 'Sell from different opens at once - more complicated',
+        'test_trade_list' : [
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, total_shares_num=5, shares_left=5), 5),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=120, total_shares_num=10, shares_left=10), 7),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=130, total_shares_num=-12, shares_left=-12), 8),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, total_shares_num=10, shares_left=10), 8),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=70, total_shares_num=-12, shares_left=-12), 9)
+        ],
+        'expected_profit_loss' : [1200, 560, -630, -1530]
+    },
+    {
+        # ADAM: my calculation, hopefully is correct
+        'test_name' : '2 * (Sell from different opens at once - more complicated)',
+        'test_trade_list' : [
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, total_shares_num=5, shares_left=5), 5),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=120, total_shares_num=10, shares_left=10), 7),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=130, total_shares_num=-12, shares_left=-12), 8),
+            TradeTest(TradeOpen(symbol='TEST', transaction_price=100, total_shares_num=10, shares_left=10), 8),
+            TradeTest(TradeClose(symbol='TEST', transaction_price=70, total_shares_num=-12, shares_left=-12), 9),
+            TradeTest(TradeOpen(symbol='TEST1', transaction_price=100, total_shares_num=5, shares_left=5), 5),
+            TradeTest(TradeOpen(symbol='TEST1', transaction_price=120, total_shares_num=10, shares_left=10), 7),
+            TradeTest(TradeClose(symbol='TEST1', transaction_price=130, total_shares_num=-12, shares_left=-12), 8),
+            TradeTest(TradeOpen(symbol='TEST1', transaction_price=100, total_shares_num=10, shares_left=10), 8),
+            TradeTest(TradeClose(symbol='TEST1', transaction_price=70, total_shares_num=-12, shares_left=-12), 9)
+        ],
+        'expected_profit_loss' : [1200, 560, -630, -1530] * 2
     }
 ]
 
