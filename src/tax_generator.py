@@ -5,7 +5,7 @@ import io
 import datetime
 import texttable as tt
 
-IB_ACTIVITY_STATEMENT_CSV = 'test.csv'
+IB_ACTIVITY_STATEMENT_CSV = 'U2903438_20190101_20190627.csv'
 BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS = 'ExchangeRates.xlsx'
 BANK_OF_ISRAEL_DATE_COL = 0
 BANK_OF_ISRAEL_RATE_COL = 1
@@ -134,6 +134,7 @@ class Dividend():
         self.symbol = ''
         self.date = None
         self.value_usd = 0
+        self.tax_deducted_usd = 0
 
 '''
 The dividends will be held in the following stucture:
@@ -146,6 +147,7 @@ The dividends will be held in the following stucture:
 '''
 def dividends_parse():
     dividend_list = []
+    dividend_helper_dict = {}
     with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
         id = []
         for ln in ib_csv_file:
@@ -167,6 +169,30 @@ def dividends_parse():
             dividend.date = datetime.datetime.strptime(row['Date'], '%Y-%m-%d')
             dividend.value_usd = float(row['Amount'])
             dividend_list.append(dividend)
+            dividend_helper_dict[f'{dividend.symbol}-{dividend.date}'] = dividend
+            print(f'{dividend.symbol}-{dividend.date}')
+
+    # Get tax deducted
+    with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
+        id = []
+        for ln in ib_csv_file:
+            if ln.startswith("Withholding Tax,"):
+                id.append(ln)
+
+        s = '\n'.join(id)
+
+        csv_reader = csv.DictReader(io.StringIO(s))
+
+        for row in csv_reader:
+            # If end of dividends
+            print(row)
+            if row['Currency'] == 'Total':
+                break
+            symbol = row['Description'].split('(')[0]
+            date = f'{row["Date"]} 00:00:00'
+            print(f'{symbol}-{date}')
+            print(float(row['Amount']))
+            dividend_helper_dict[f'{symbol}-{date}'].tax_deducted_usd = 0 - float(row['Amount'])
 
     return dividend_list
 
@@ -194,6 +220,76 @@ class Form1325Entry():
     def to_header_list():
         return ['symbol', 'sale_value_usd', 'purchase_date', 'orig_price_ils', 'usd_sale_to_purchase_rate', 'adjusted_price', 'sale_date', 'sale_value', 'profit_loss']
 
+
+def _tax_to_pay(nominal_profit_loss, inflational_profit_loss):
+    taxable = 0
+    real_profit_lost = nominal_profit_loss - inflational_profit_loss
+    # # Different signs
+    # if inflational_profit_loss * nominal_profit_loss < 0:
+    #     taxable = nominal_profit_loss
+    # else:  # Same sign
+    #     taxable = nominal_profit_loss - inflational_profit_loss
+    #
+    #     # If inflation causes a sign change - leave the profit at 0
+    #     if nominal_profit_loss * taxable < 0:
+    #         taxable = 0
+    #
+    # # If loss - disregard inflation
+    # if taxable < 0:
+    #     taxable = nominal_profit_loss
+
+    def is_nominal_profit():
+        return nominal_profit_loss >= 0
+    def is_nominal_loss():
+        return not is_nominal_profit()
+    def is_inflational_profit():
+        return inflational_profit_loss >= 0
+    def is_inflational_loss():
+        return not is_inflational_profit()
+    def is_real_profit():
+        return real_profit_lost >= 0
+    def is_real_loss():
+        return not is_real_profit()
+
+    # These are the different cases:
+    if is_nominal_profit() and is_inflational_profit() and is_real_profit():
+        taxable = real_profit_lost
+    elif is_nominal_profit() and is_inflational_loss() and is_real_profit():
+        taxable = nominal_profit_loss
+    elif is_nominal_loss() and is_inflational_loss() and is_real_profit():
+        taxable = 0
+    elif is_nominal_loss() and is_inflational_loss() and is_real_loss():
+        taxable = real_profit_lost # This is according to example Meir
+        #taxable = nominal_profit_loss # maybe this is the correct one? (according to form)
+    elif is_nominal_loss() and is_inflational_profit() and is_real_loss():
+        taxable = nominal_profit_loss
+    elif is_nominal_profit() and is_inflational_profit() and is_real_loss():
+        taxable = 0
+    else:
+        raise Exception("Encountered case that wasn't handled. Please fix bug")
+
+    return taxable
+
+
+def get_existing_exchange_date(date, dollar_ils_rate):
+    '''
+    If exchange date does not exist in dict, there must be vacation in Israel
+    So try a day earlier - until one exists
+    :param date: date to search around
+    :param dollar_ils_rate: parsed exchanges dictionary
+    :return: datetime object as close as possible to date (but no later than date)
+             with a rate that exists in dollar_ils_rate
+    '''
+
+    search_range = 5
+    exchange_date = None
+    for i in range(0, search_range):
+        if date - datetime.timedelta(i) in dollar_ils_rate:
+            exchange_date = date - datetime.timedelta(i)
+            break
+    if exchange_date is None:
+        raise Exception('USD/ILS exchange rate not found near closing date: {}'.format(date))
+    return exchange_date
 
 def form1325_list_create(trade_dic, dollar_ils_rate):
     '''
@@ -264,13 +360,7 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
             # If exchange date does not exist in dict, there must be vacation in Israel
             # So try a day earlier - until one exists
             for j in range(0,2):
-                search_range = 5
-                for i in range(0,search_range):
-                    if tup[j].date - datetime.timedelta(i) in dollar_ils_rate:
-                        exchange_dates[j] = tup[j].date - datetime.timedelta(i)
-                        break
-                if exchange_dates[j] is None:
-                    raise Exception('USD/ILS exchange rate not found near closing date. Trade: {}'.format(tup[j]))
+                exchange_dates[j] = get_existing_exchange_date(tup[j].date, dollar_ils_rate)
 
             sell_date = exchange_dates[0]
             buy_date = exchange_dates[1]
@@ -307,20 +397,8 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
             form_entry.sale_date = sell_date
             realized = tup[0].realized # hon nominali
             inflation = form_entry.orig_price_ils * (rate - 1)
+            form_entry.profit_loss = _tax_to_pay(realized, inflation)
 
-            # Different signs
-            if inflation * realized < 0:
-                form_entry.profit_loss = realized
-            else: # Same sign
-                form_entry.profit_loss = realized - inflation
-
-                # If inflation causes a sign change - leave the profit at 0
-                if realized * form_entry.profit_loss < 0:
-                    form_entry.profit_loss = 0
-
-            # If loss - disregard inflation
-            if form_entry.profit_loss < 0:
-                form_entry.profit_loss = realized
 
             # form_entry.profit_loss = form_entry.sale_value - form_entry.adjusted_price =>
             form_entry.adjusted_price = form_entry.sale_value - form_entry.profit_loss
@@ -345,15 +423,20 @@ class Form1322AppendixEntry():
         self.value_usd = dividend.value_usd
         self.rate = 0
         self.value_ils = 0
+        self.tax_deducted_usd = dividend.tax_deducted_usd
+        self.tax_deducted_ils = 0
 
     def populate(self, dollar_ils_rate):
-        self.rate = dollar_ils_rate[self.date]
+        self.rate = dollar_ils_rate[get_existing_exchange_date(self.date, dollar_ils_rate)]
         self.value_ils = self.value_usd * self.rate
+        self.tax_deducted_ils = self.tax_deducted_usd * dollar_ils_rate[
+            get_existing_exchange_date(self.date, dollar_ils_rate)]
+
     @staticmethod
     def to_header_list():
-        return ['symbol', 'date', 'value_usd', 'rate', 'value_ils']
+        return ['symbol', 'date', 'value_usd', 'rate', 'value_ils', 'tax_deducted_ils']
     def to_list(self):
-        return [self.symbol, self.date, self.value_usd, self.rate, self.value_ils]
+        return [self.symbol, self.date, self.value_usd, self.rate, self.value_ils, self.tax_deducted_ils]
 
 def form1322_appendix_list_create(dividends_list, dollar_ils_rate):
     lst = []
@@ -365,6 +448,10 @@ def form1322_appendix_list_create(dividends_list, dollar_ils_rate):
 
 def sum_profit_loss(form1325_list):
     return sum([entry.profit_loss for entry in form1325_list])
+
+def print_broker_form1099_retrieval_instructions():
+    print('\nBroker tax form 1099:')
+    print('In your Interactive Brokers account go to Reports > Tax > Tax Forms')
 
 def print_form1325_list(form1325_list):
     tab = tt.Texttable()
@@ -393,7 +480,8 @@ def print_form1322_appendix_list(dividends_list):
     print(s)
     total_usd = sum([div.value_usd for div in dividends_list])
     total_ils = sum([div.value_ils for div in dividends_list])
-    print(f'total_usd: {total_usd}\ttotal_ils: {total_ils}')
+    total_ils_deducted = sum([div.tax_deducted_ils for div in dividends_list])
+    print(f'total_usd: {total_usd}\ttotal_ils: {total_ils}\ttotal_ils_deducted: {total_ils_deducted}')
 def main():
     dollar_ils_rate = dollar_ils_rate_parse()
     trade_dic = trades_parse()
@@ -403,6 +491,7 @@ def main():
     form1322_appendix_list = form1322_appendix_list_create(dividends_list, dollar_ils_rate)
     print_form1325_list(form1325_list)
     print_form1322_appendix_list(form1322_appendix_list)
+    print_broker_form1099_retrieval_instructions()
 
 if __name__ == "__main__":
 
