@@ -105,3 +105,6 @@ venv.bak/
 
 # pycharm
 .idea/
+
+# Generated files
+generated_files/

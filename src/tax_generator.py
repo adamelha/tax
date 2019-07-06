@@ -4,13 +4,21 @@ import csv
 import io
 import datetime
 import texttable as tt
+from excel_helper import gen_excel_file, write_row, close_workbook
+import os
 
+LOSS_FROM_PREV_YEARS = 0
 IB_ACTIVITY_STATEMENT_CSV = 'U2903438_20190101_20190627.csv'
 BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS = 'ExchangeRates.xlsx'
 BANK_OF_ISRAEL_DATE_COL = 0
 BANK_OF_ISRAEL_RATE_COL = 1
 IB_CODE_OPEN = 'O'
 IB_CODE_CLOSE = 'C'
+GENERATE_EXCEL_FILES = True
+GENERATED_FILES_DIR = 'generated_files'
+FORM_1321_FILE_NAME = 'Form1321'
+FORM_1325_APPENDIX_FILE_NAME = 'Form1325_appendix'
+
 
 def dollar_ils_rate_parse():
     book = open_workbook(BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS)
@@ -170,7 +178,6 @@ def dividends_parse():
             dividend.value_usd = float(row['Amount'])
             dividend_list.append(dividend)
             dividend_helper_dict[f'{dividend.symbol}-{dividend.date}'] = dividend
-            print(f'{dividend.symbol}-{dividend.date}')
 
     # Get tax deducted
     with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
@@ -185,13 +192,10 @@ def dividends_parse():
 
         for row in csv_reader:
             # If end of dividends
-            print(row)
             if row['Currency'] == 'Total':
                 break
             symbol = row['Description'].split('(')[0]
             date = f'{row["Date"]} 00:00:00'
-            print(f'{symbol}-{date}')
-            print(float(row['Amount']))
             dividend_helper_dict[f'{symbol}-{date}'].tax_deducted_usd = 0 - float(row['Amount'])
 
     return dividend_list
@@ -366,7 +370,6 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
             buy_date = exchange_dates[1]
             form_entry.symbol = tup[0].symbol
             form_entry.sale_value_usd = tup[0].transaction_price * tup[2]
-            print(tup[0].transaction_price)
             form_entry.purchase_date = tup[1].date
             form_entry.orig_price_ils = tup[1].transaction_price * tup[2] * dollar_ils_rate[buy_date]
             form_entry.orig_price_ils += (tup[0].commission * dollar_ils_rate[sell_date] + tup[1].commission * dollar_ils_rate[buy_date])
@@ -434,7 +437,7 @@ class Form1322AppendixEntry():
 
     @staticmethod
     def to_header_list():
-        return ['symbol', 'date', 'value_usd', 'rate', 'value_ils', 'tax_deducted_ils']
+        return ['symbol', 'date', 'dividend_value_usd', 'rate', 'dividend_value_ils', 'tax_deducted_ils']
     def to_list(self):
         return [self.symbol, self.date, self.value_usd, self.rate, self.value_ils, self.tax_deducted_ils]
 
@@ -455,34 +458,63 @@ def print_broker_form1099_retrieval_instructions():
 
 def print_form1325_list(form1325_list):
     tab = tt.Texttable()
-    tab.header(Form1325Entry.to_header_list())
+    header_list = Form1325Entry.to_header_list()
+    tab.header(header_list)
+    values_list = []
     print('\nForm 1325 appendix 3 (nispah gimmel):')
     for entry in form1325_list:
         #for row in zip(entry.to_list()):
         tab.add_row(entry.to_list())
         s = tab.draw()
+        values_list += [entry.to_list()]
     print(s)
     total_profits = sum([entry.profit_loss for entry in form1325_list if entry.profit_loss >= 0])
     total_losses = sum([entry.profit_loss for entry in form1325_list if entry.profit_loss < 0])
     total_sales = sum([entry.sale_value for entry in form1325_list])
     print(f'Total profits: {total_profits}\tTotal losses: {total_losses}')
     print(f'Total sales {total_sales}')
+    if GENERATE_EXCEL_FILES:
+        workbook, worksheet, next_row = gen_excel_file(FORM_1325_APPENDIX_FILE_NAME, header_list, values_list, close_workbook=False)
+        # Skip row
+        next_row += 1
+        next_row = write_row(worksheet, next_row, ['Total profits', total_profits])
+        next_row = write_row(worksheet, next_row, ['Total losses', total_losses])
+        next_row = write_row(worksheet, next_row, ['Total sales', total_sales])
+        close_workbook(workbook)
+
 
 
 def print_form1322_appendix_list(dividends_list):
+    values_list = []
+    header_list = Form1322AppendixEntry.to_header_list()
     tab = tt.Texttable()
-    tab.header(Form1322AppendixEntry.to_header_list())
+    tab.header(header_list)
     print('\nForm 1322 appendix:')
     for div in dividends_list:
         # for row in zip(entry.to_list()):
         tab.add_row(div.to_list())
         s = tab.draw()
+        values_list += [div.to_list()]
     print(s)
     total_usd = sum([div.value_usd for div in dividends_list])
     total_ils = sum([div.value_ils for div in dividends_list])
     total_ils_deducted = sum([div.tax_deducted_ils for div in dividends_list])
     print(f'total_usd: {total_usd}\ttotal_ils: {total_ils}\ttotal_ils_deducted: {total_ils_deducted}')
+
+    if GENERATE_EXCEL_FILES:
+        workbook, worksheet, next_row = gen_excel_file(FORM_1321_FILE_NAME, header_list, values_list, close_workbook=False)
+        #rows = ('total_usd: {total_usd}\ttotal_ils: {total_ils}\ttotal_ils_deducted: {total_ils_deducted}')
+        next_row = write_row(worksheet, next_row, ['Total', '', total_usd, '', total_ils, total_ils_deducted])
+        close_workbook(workbook)
+
+def create_gen_dir():
+    if GENERATE_EXCEL_FILES:
+        if not os.path.exists(GENERATED_FILES_DIR):
+            os.makedirs(GENERATED_FILES_DIR)
+
+
 def main():
+    create_gen_dir()
     dollar_ils_rate = dollar_ils_rate_parse()
     trade_dic = trades_parse()
     dividends_list = dividends_parse()
@@ -492,6 +524,9 @@ def main():
     print_form1325_list(form1325_list)
     print_form1322_appendix_list(form1322_appendix_list)
     print_broker_form1099_retrieval_instructions()
+
+    if GENERATE_EXCEL_FILES:
+        print(f"\nCheck the '{GENERATED_FILES_DIR}' directory for the generated Excel files")
 
 if __name__ == "__main__":
 
