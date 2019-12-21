@@ -6,22 +6,31 @@ import datetime
 import texttable as tt
 from excel_helper import gen_excel_file, write_row, close_workbook
 import os
+import requests
+import win32com.client  # pip install pypiwin32
 
+# Input parameters with default values:
 LOSS_FROM_PREV_YEARS = 0
-IB_ACTIVITY_STATEMENT_CSV = 'U2903438_20190101_20190627.csv'
+IB_ACTIVITY_STATEMENT_CSV = 'U2903438_20190101_20191219.csv'  # IB activity statement CSV file for the entire year (must include trades and dividends)
+GET_EXCHANGE_RATES_FROM_WEB = True  # If False - use the BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS file
+EXCHANGE_RATES_FROM_WEB_START_DATE = '30-12-2018'  # All trades must be no earlier than this date
+EXCHANGE_RATES_FROM_WEB_END_DATE = '30-12-2019' # All trades must be no later than this date
+GENERATE_EXCEL_FILES = True  # Generate Excel files for appendixes. If False - just print the tables
+GENERATED_FILES_DIR = 'generated_files'  # Dir to generate the files to
+
+# Constants:
 BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS = 'ExchangeRates.xlsx'
 BANK_OF_ISRAEL_DATE_COL = 0
 BANK_OF_ISRAEL_RATE_COL = 1
 IB_CODE_OPEN = 'O'
 IB_CODE_CLOSE = 'C'
-GENERATE_EXCEL_FILES = True
-GENERATED_FILES_DIR = 'generated_files'
 FORM_1321_FILE_NAME = 'Form1321'
 FORM_1325_APPENDIX_FILE_NAME = 'Form1325_appendix'
 
 
-def dollar_ils_rate_parse():
-    book = open_workbook(BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS)
+
+def dollar_ils_rate_parse_from_excel_file(file):
+    book = open_workbook(file)
     sheet = book.sheet_by_index(0)
 
     dic = dict()
@@ -41,6 +50,44 @@ def dollar_ils_rate_parse():
 
     return dic
 
+
+def dollar_ils_rate_parse_from_bank_of_israel_site():
+    def convert_date(date_str):
+        return date_str.replace('-', '%2F')
+
+    def fetch_corrupted_excel_file():
+        url = f'https://www.boi.org.il/Boi.ashx?Command=DownloadExcel&Currency=3&' \
+              f'DateStart={convert_date(EXCHANGE_RATES_FROM_WEB_START_DATE)}' \
+              f'&DateEnd={convert_date(EXCHANGE_RATES_FROM_WEB_END_DATE)}&webUrl=%2Fhe%2FMarkets%2FExchangeRates'
+        return requests.get(url)
+
+    def fix_corrupted_excel_file(temp_filename, filename):
+        o = win32com.client.Dispatch("Excel.Application")
+        o.Visible = False
+
+        wb = o.Workbooks.Open(temp_filename)
+        wb.ActiveSheet.SaveAs(filename, 51)
+        wb.Close()
+
+    temp_filename = os.getcwd() + '/' + '_tmp_exchanges.xls'
+    filename = os.getcwd() + '/' + '_exchanges.xlsx'
+    if os.path.exists(temp_filename):
+        os.remove(temp_filename)
+    if os.path.exists(filename):
+        os.remove(filename)
+
+    response = fetch_corrupted_excel_file()
+    with open(temp_filename, 'wb') as temp:
+        temp.write(response.content)
+
+    fix_corrupted_excel_file(temp_filename, filename)
+    return dollar_ils_rate_parse_from_excel_file(filename)
+
+def dollar_ils_rate_parse():
+    if not GET_EXCHANGE_RATES_FROM_WEB:
+        return dollar_ils_rate_parse_from_excel_file(BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS)
+    return dollar_ils_rate_parse_from_bank_of_israel_site()
+
 class Trade():
     def __init__(self):
         self.symbol = ''
@@ -51,6 +98,7 @@ class Trade():
         self.shares_left = 0
     def __str__(self):
         return 'Trade: symbol:{}, date:{} comm:{}, price:{}'.format(self.symbol, self.date, self.commission, self.transaction_price)
+
 class TradeOpen(Trade):
     def __init__(self, **kwargs):
         super().__init__()
@@ -109,7 +157,7 @@ def trades_parse():
                 print(e)
                 continue
 
-            if open_close == IB_CODE_OPEN:
+            if open_close == IB_CODE_OPEN or IB_CODE_OPEN + ';' in open_close:
                 trade = TradeOpen()
             elif open_close == IB_CODE_CLOSE:
                 trade = TradeClose()
@@ -214,7 +262,7 @@ class Form1325Entry():
 
     def __str__(self):
         return 'symbol\tsale_value_usd\tpurchase_date\torig_price_ils\tusd_sale_to_purchase_rate\tadjusted_price\tsale_date\tsale_value\tprofit_loss\n' \
-               '{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}'.format(self.symbol, self.sale_value_usd, self.purchase_date, self.orig_price_ils, self.usd_sale_to_purchase_rate, self.adjusted_price, self.sale_date, self.sale_value, self.profit_loss)
+               '<{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}>'.format(self.symbol, self.sale_value_usd, self.purchase_date, self.orig_price_ils, self.usd_sale_to_purchase_rate, self.adjusted_price, self.sale_date, self.sale_value, self.profit_loss)
     def __repr__(self):
         return self.__str__()
     def to_list(self):
@@ -372,8 +420,9 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
             form_entry.sale_value_usd = tup[0].transaction_price * tup[2]
             form_entry.purchase_date = tup[1].date
             form_entry.orig_price_ils = tup[1].transaction_price * tup[2] * dollar_ils_rate[buy_date]
+            print(f'orig_price_ils = {form_entry.orig_price_ils}')
             form_entry.orig_price_ils += (tup[0].commission * dollar_ils_rate[sell_date] + tup[1].commission * dollar_ils_rate[buy_date])
-
+            print(f'orig_price_ils = {form_entry.orig_price_ils}')
             # zero out the commissions so that we do not use them for other entries envolving this trade.
             # For instance buy 1, buy 1, sell 2: we split the sell trade to 2 entries, so we make sure
             # we only add the commission to the price once
