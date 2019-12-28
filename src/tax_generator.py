@@ -1,15 +1,18 @@
 from xlrd import open_workbook
 from xlrd import xldate
 import csv
-import io
 import datetime
 import texttable as tt
 from excel_helper import gen_excel_file, write_row, close_workbook
 import os
 import requests
 import win32com.client  # pip install pypiwin32
+import io
+from pdf_helpers import generate_form1322_pdf
+
 
 # Input parameters with default values:
+TAX_YEAR = 2019
 LOSS_FROM_PREV_YEARS = 0
 IB_ACTIVITY_STATEMENT_CSV = 'U2903438_20190101_20191219.csv'  # IB activity statement CSV file for the entire year (must include trades and dividends)
 GET_EXCHANGE_RATES_FROM_WEB = True  # If False - use the BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS file
@@ -18,16 +21,19 @@ EXCHANGE_RATES_FROM_WEB_END_DATE = '30-12-2019' # All trades must be no later th
 GENERATE_EXCEL_FILES = True  # Generate Excel files for appendixes. If False - just print the tables
 GENERATED_FILES_DIR = 'generated_files'  # Dir to generate the files to
 
+
 # Constants:
 BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS = 'ExchangeRates.xlsx'
 BANK_OF_ISRAEL_DATE_COL = 0
 BANK_OF_ISRAEL_RATE_COL = 1
 IB_CODE_OPEN = 'O'
 IB_CODE_CLOSE = 'C'
-FORM_1321_FILE_NAME = 'Form1321'
+FORM_1322_FILE_NAME = 'Form1322'  # Excel file
 FORM_1325_APPENDIX_FILE_NAME = 'Form1325_appendix'
-
-
+FORM_1322_TEMPLATE_PDF = 'itc1322_18.pdf'
+FORM_1322_DEDUCTED_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form1322_deducted' + '.pdf')
+FORM_1322_NOT_DEDUCTED_1_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form1322_not_deducted_1st_half' + '.pdf')
+FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form1322_not_deducted_2nd_half' + '.pdf')
 
 def dollar_ils_rate_parse_from_excel_file(file):
     book = open_workbook(file)
@@ -551,7 +557,7 @@ def print_form1322_appendix_list(dividends_list):
     print(f'total_usd: {total_usd}\ttotal_ils: {total_ils}\ttotal_ils_deducted: {total_ils_deducted}')
 
     if GENERATE_EXCEL_FILES:
-        workbook, worksheet, next_row = gen_excel_file(FORM_1321_FILE_NAME, header_list, values_list, close_workbook=False)
+        workbook, worksheet, next_row = gen_excel_file(FORM_1322_FILE_NAME, header_list, values_list, close_workbook=False)
         #rows = ('total_usd: {total_usd}\ttotal_ils: {total_ils}\ttotal_ils_deducted: {total_ils_deducted}')
         next_row = write_row(worksheet, next_row, ['Total', '', total_usd, '', total_ils, total_ils_deducted])
         close_workbook(workbook)
@@ -560,6 +566,8 @@ def create_gen_dir():
     if GENERATE_EXCEL_FILES:
         if not os.path.exists(GENERATED_FILES_DIR):
             os.makedirs(GENERATED_FILES_DIR)
+
+
 
 
 def main():
@@ -576,6 +584,21 @@ def main():
 
     if GENERATE_EXCEL_FILES:
         print(f"\nCheck the '{GENERATED_FILES_DIR}' directory for the generated Excel files")
+
+    not_deducted_1_1322_list = [rec for rec in form1322_appendix_list
+                                if (rec.tax_deducted_ils == 0 and
+                                    rec.date < datetime.datetime(TAX_YEAR, 7, 1))]
+    not_deducted_2_1322_list = [rec for rec in form1322_appendix_list
+                                if (rec.tax_deducted_ils == 0 and
+                                    rec.date >= datetime.datetime(TAX_YEAR, 7, 1))]
+    deducted_by_broker_1322_list = [rec for rec in form1322_appendix_list if rec.tax_deducted_ils != 0]
+
+    generate_form1322_pdf(deducted_by_broker_1322_list, FORM_1322_TEMPLATE_PDF, FORM_1322_DEDUCTED_OUTPUT_PDF,
+                          tax_deduction='by_broker')
+    generate_form1322_pdf(not_deducted_1_1322_list, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_1_OUTPUT_PDF,
+                          tax_deduction='not_deducted_1')
+    generate_form1322_pdf(not_deducted_2_1322_list, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF,
+                          tax_deduction='not_deducted_2')
 
 if __name__ == "__main__":
 
