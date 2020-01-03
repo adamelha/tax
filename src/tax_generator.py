@@ -1,3 +1,4 @@
+from copy import deepcopy
 from xlrd import open_workbook
 from xlrd import xldate
 import csv
@@ -13,7 +14,7 @@ from pdf_helpers import generate_form1322_pdf
 
 # Input parameters with default values:
 TAX_YEAR = 2019
-LOSS_FROM_PREV_YEARS = 0
+LOSS_FROM_PREV_YEARS = 1000
 IB_ACTIVITY_STATEMENT_CSV = 'U2903438_20190101_20191219.csv'  # IB activity statement CSV file for the entire year (must include trades and dividends)
 GET_EXCHANGE_RATES_FROM_WEB = True  # If False - use the BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS file
 EXCHANGE_RATES_FROM_WEB_START_DATE = '30-12-2018'  # All trades must be no earlier than this date
@@ -279,6 +280,15 @@ class Form1325Entry():
         return ['symbol', 'sale_value_usd', 'purchase_date', 'orig_price_ils', 'usd_sale_to_purchase_rate', 'adjusted_price', 'sale_date', 'sale_value', 'profit_loss']
 
 
+class Form1325:
+    def __init__(self):
+        self.entry_list = []
+
+    def add_totals(self):
+        self.total_profits = sum([entry.profit_loss for entry in self.entry_list if entry.profit_loss >= 0])
+        self.total_losses = sum([entry.profit_loss for entry in self.entry_list if entry.profit_loss < 0])
+        self.total_sales = sum([entry.sale_value for entry in self.entry_list])
+
 def _tax_to_pay(nominal_profit_loss, inflational_profit_loss):
     taxable = 0
     real_profit_lost = nominal_profit_loss - inflational_profit_loss
@@ -349,7 +359,7 @@ def get_existing_exchange_date(date, dollar_ils_rate):
         raise Exception('USD/ILS exchange rate not found near closing date: {}'.format(date))
     return exchange_date
 
-def form1325_list_create(trade_dic, dollar_ils_rate):
+def form1325_obj_create(trade_dic, dollar_ils_rate):
     '''
     Create Tofes 1325 nispah hey (5)
     Summery of selling of stock which were not taxed
@@ -471,7 +481,10 @@ def form1325_list_create(trade_dic, dollar_ils_rate):
 
             #form_entry.profit_loss = form_entry.sale_value - form_entry.adjusted_price
             entries.append(form_entry)
-    return entries
+    form = Form1325()
+    form.entry_list = entries
+    form.add_totals()
+    return form
 
 
 class Form1322AppendixEntry():
@@ -511,30 +524,27 @@ def print_broker_form1099_retrieval_instructions():
     print('\nBroker tax form 1099:')
     print('In your Interactive Brokers account go to Reports > Tax > Tax Forms')
 
-def print_form1325_list(form1325_list):
+def print_form1325_list(form1325):
     tab = tt.Texttable()
     header_list = Form1325Entry.to_header_list()
     tab.header(header_list)
     values_list = []
     print('\nForm 1325 appendix 3 (nispah gimmel):')
-    for entry in form1325_list:
+    for entry in form1325.entry_list:
         #for row in zip(entry.to_list()):
         tab.add_row(entry.to_list())
         s = tab.draw()
         values_list += [entry.to_list()]
     print(s)
-    total_profits = sum([entry.profit_loss for entry in form1325_list if entry.profit_loss >= 0])
-    total_losses = sum([entry.profit_loss for entry in form1325_list if entry.profit_loss < 0])
-    total_sales = sum([entry.sale_value for entry in form1325_list])
-    print(f'Total profits: {total_profits}\tTotal losses: {total_losses}')
-    print(f'Total sales {total_sales}')
+    print(f'Total profits: {form1325.total_profits}\tTotal losses: {form1325.total_losses}')
+    print(f'Total sales {form1325.total_sales}')
     if GENERATE_EXCEL_FILES:
         workbook, worksheet, next_row = gen_excel_file(FORM_1325_APPENDIX_FILE_NAME, header_list, values_list, close_workbook=False)
         # Skip row
         next_row += 1
-        next_row = write_row(worksheet, next_row, ['Total profits', total_profits])
-        next_row = write_row(worksheet, next_row, ['Total losses', total_losses])
-        next_row = write_row(worksheet, next_row, ['Total sales', total_sales])
+        next_row = write_row(worksheet, next_row, ['Total profits', form1325.total_profits])
+        next_row = write_row(worksheet, next_row, ['Total losses', form1325.total_losses])
+        next_row = write_row(worksheet, next_row, ['Total sales', form1325.total_sales])
         close_workbook(workbook)
 
 
@@ -568,7 +578,11 @@ def create_gen_dir():
             os.makedirs(GENERATED_FILES_DIR)
 
 
-
+def create_form1325_from_date_range(original_form1325, start_date, end_date):
+    f = Form1325()
+    f.entry_list = [rec for rec in original_form1325.entry_list if rec.sale_date >= start_date and rec.sale_date < end_date]
+    f.add_totals()
+    return f
 
 def main():
     create_gen_dir()
@@ -576,9 +590,9 @@ def main():
     trade_dic = trades_parse()
     dividends_list = dividends_parse()
     #print(trade_dic)
-    form1325_list = form1325_list_create(trade_dic, dollar_ils_rate)
+    form1325 = form1325_obj_create(trade_dic, dollar_ils_rate)
     form1322_appendix_list = form1322_appendix_list_create(dividends_list, dollar_ils_rate)
-    print_form1325_list(form1325_list)
+    print_form1325_list(form1325)
     print_form1322_appendix_list(form1322_appendix_list)
     print_broker_form1099_retrieval_instructions()
 
@@ -593,12 +607,21 @@ def main():
                                     rec.date >= datetime.datetime(TAX_YEAR, 7, 1))]
     deducted_by_broker_1322_list = [rec for rec in form1322_appendix_list if rec.tax_deducted_ils != 0]
 
-    generate_form1322_pdf(deducted_by_broker_1322_list, FORM_1322_TEMPLATE_PDF, FORM_1322_DEDUCTED_OUTPUT_PDF,
-                          tax_deduction='by_broker')
-    generate_form1322_pdf(not_deducted_1_1322_list, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_1_OUTPUT_PDF,
-                          tax_deduction='not_deducted_1')
-    generate_form1322_pdf(not_deducted_2_1322_list, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF,
-                          tax_deduction='not_deducted_2')
+    form1325_1st_half = create_form1325_from_date_range(form1325, datetime.datetime(TAX_YEAR, 1, 1),
+                                                        datetime.datetime(TAX_YEAR, 7, 1))
+    form1325_2nd_half = create_form1325_from_date_range(form1325, datetime.datetime(TAX_YEAR, 7, 1),
+                                                        datetime.datetime(TAX_YEAR + 1, 1, 1))
+
+    loss_remaining_from_prev = LOSS_FROM_PREV_YEARS
+    loss_remaining_from_stock = form1325.total_losses * -1  # Make positive
+    # loss_remaining = generate_form1322_pdf(deducted_by_broker_1322_list, FORM_1322_TEMPLATE_PDF, FORM_1322_DEDUCTED_OUTPUT_PDF,
+    #                       tax_deduction='by_broker', loss_remaining=loss_remaining)
+    loss_remaining_from_prev, loss_remaining_from_stock = generate_form1322_pdf(form1325_1st_half, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_1_OUTPUT_PDF,
+                          tax_deduction='not_deducted_1', credits_from_prev=loss_remaining_from_prev, credits_from_stock=loss_remaining_from_stock)
+    loss_remaining_from_prev, loss_remaining_from_stock = generate_form1322_pdf(form1325_2nd_half, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF,
+                          tax_deduction='not_deducted_2', credits_from_prev=loss_remaining_from_prev, credits_from_stock=loss_remaining_from_stock, dividend_list=form1322_appendix_list)
+    print(f'Total loss from previous year remaining for the next tax year: {loss_remaining_from_prev }')
+    print(f'Total loss from stock remaining for the next tax year: {loss_remaining_from_stock}')
 
 if __name__ == "__main__":
 
