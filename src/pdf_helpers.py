@@ -1,3 +1,6 @@
+import json
+import os
+
 from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -9,15 +12,16 @@ from PyPDF2 import PdfFileWriter, PdfFileReader
 
 pdfmetrics.registerFont(TTFont('Hebrew', 'Arial.ttf'))
 
-user_data = {
-    'first-name': 'אדם',
-    'last-name': 'אלחכם',
-    'id-number': 201390085,
-    'date': '1/1/2020',
-}
+f = os.path.join(os.path.dirname(os.path.realpath(__file__)),'config.json')
+with open(f, encoding='utf-8') as json_data:
+    user_data_dict = json.load(json_data)
+    print(user_data_dict)
+
+user_data = {k: user_data_dict[k]['value'] for k in user_data_dict.keys() }
 user_data['name'] = user_data['first-name'] + ' ' + user_data['last-name']
+
 class PdfText:
-    def __init__(self, text, x, y, space_between_chars=False, direction=None, empty_string_if_zero=False):
+    def __init__(self, text, x, y, space_between_chars=False, direction=None, empty_string_if_zero=False, reverse_text=True):
         '''For coordinante system where origin is top left and x and y are in inches.'''
         self.x = x * inch
         self.y = y * inch
@@ -28,7 +32,8 @@ class PdfText:
             else:
                 self.direction = 'RTL'
             if self.direction == 'RTL':
-                self.text = text[::-1]
+                if reverse_text:
+                    self.text = text[::-1]
         elif type(text) is int:
             self.direction = 'LTR'
             if empty_string_if_zero and text == 0:
@@ -56,7 +61,7 @@ class XMark(PdfText):
 
 # Form 1322 marks
 form_1322_data = [PdfText(user_data['name'], 7.25, 1.82),
-                  PdfText(user_data['id-number'], 1.61, 1.83, space_between_chars=True),
+                  PdfText(user_data['id-number'], 1.61, 1.83, space_between_chars=True, reverse_text=False),
                   XMark(0.95, 1.77), # mehira letzad kashur - no
                   XMark(0.95, 2.23), # mehira metzad kashur - no
                   XMark(7.34, 2.23), # My ownership - yes
@@ -175,7 +180,7 @@ def generate_form1322_pdf(form_1325, input_file, output_file, tax_deduction='by_
 
 form_1324_data = [PdfText(user_data['first-name'], 7.6, 2.77),
                   PdfText(user_data['last-name'], 5.85, 2.77),
-                  PdfText(user_data['id-number'], 2.7, 2.77, space_between_chars=True),
+                  PdfText(user_data['id-number'], 2.7, 2.77, space_between_chars=True, reverse_text=False),
                   ]
 
 
@@ -190,7 +195,7 @@ def generate_form1324_pdf(template_pdf, output_pdf, form1325, dividends, dividen
     # Page 2
     form_1324_page2_list = [PdfText(dividends_profits_including_deduction, 1.95, 5.36)]
     form_1324_page2_list += [XMark(3.93, 8.45)]
-    form_1324_page2_list += [PdfText(user_data['date'], 7.48, 9.48)]
+    form_1324_page2_list += [PdfText(user_data['date'], 6.41, 9.48, direction='LTR')]
 
 
     packet = [None] * 2

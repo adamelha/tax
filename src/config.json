@@ -1,0 +1,18 @@
+{
+  "first-name": {
+    "description": "First name in hebrew",
+    "value": "אדם"
+  },
+  "last-name": {
+    "description": "Last name in hebrew",
+    "value": "אלחכם"
+  },
+  "id-number": {
+    "description": "Teudat zehut",
+    "value": "201390085"
+  },
+  "date": {
+    "description": "Filing date",
+    "value": "1/1/2020"
+  }
+}
