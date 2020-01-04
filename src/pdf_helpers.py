@@ -10,13 +10,14 @@ from PyPDF2 import PdfFileWriter, PdfFileReader
 pdfmetrics.registerFont(TTFont('Hebrew', 'Arial.ttf'))
 
 user_data = {
-    'name': 'אדם אלחכם',
+    'first-name': 'אדם',
+    'last-name': 'אלחכם',
     'id-number': 201390085,
     'date': '1/1/2020',
 }
-
+user_data['name'] = user_data['first-name'] + ' ' + user_data['last-name']
 class PdfText:
-    def __init__(self, text, x, y, space_between_chars=False, direction=None):
+    def __init__(self, text, x, y, space_between_chars=False, direction=None, empty_string_if_zero=False):
         '''For coordinante system where origin is top left and x and y are in inches.'''
         self.x = x * inch
         self.y = y * inch
@@ -29,11 +30,20 @@ class PdfText:
             if self.direction == 'RTL':
                 self.text = text[::-1]
         elif type(text) is int:
-            self.text = str(text)
             self.direction = 'LTR'
+            if empty_string_if_zero and text == 0:
+                self.text = ''
+            else:
+                self.text = str(text)
         elif type(text) is float:
-            self.text = str("{0:.2f}".format(text))
             self.direction = 'LTR'
+            if empty_string_if_zero and text < 0.1:
+                self.text = ''
+            else:
+                if text < 0.1:
+                    self.text = '0'
+                else:
+                    self.text = str(round(text))
         if space_between_chars:
             self.text = ' '.join(self.text)
         self.convert_top_left_origin_to_bottom_left_origin()
@@ -85,12 +95,11 @@ def try_to_deduct(deduct_from, detuct_credits):
 # Return what is left from losses - to be inserted as loss_from_previous in next call
 # Return <credits_left_from_prev, credits_left_from_stock)
 def generate_form1322_pdf(form_1325, input_file, output_file, tax_deduction='by_broker', is_foreign_asset=False,
-                          credits_from_prev=0, credits_from_stock=0, form1322_appendix_list=None, dividend_list=None):
+                          credits_from_prev=0, credits_from_stock=0, form1322_appendix_list=None, dividends=None):
     '''tax_deduction must be in ('by_broker', 'not_deducted_1', 'not_deducted_2')'''
     if tax_deduction not in ('by_broker', 'not_deducted_1', 'not_deducted_2'):
         raise Exception("tax_deduction arg must be one of ('by_broker', 'not_deducted_1', 'not_deducted_2')")
 
-    pdf_text_list = [PdfText('אדם אלחכם', 7.25, 1.82)]
     packet = io.BytesIO()
     # create a new PDF with Reportlab
     can = canvas.Canvas(packet, pagesize=letter)
@@ -114,11 +123,11 @@ def generate_form1322_pdf(form_1325, input_file, output_file, tax_deduction='by_
 
     # Loss from previous
     remaining_profit, deduct_credits_left_from_prev, credits_used_from_prv = try_to_deduct(form_1325.total_profits, credits_from_prev)
-    form_1322_list += [PdfText(credits_used_from_prv, 2.9, 5.74)]
+    form_1322_list += [PdfText(credits_used_from_prv, 2.9, 5.74, empty_string_if_zero=True)]
 
     # Loss from stock
     remaining_profit, detuct_credits_left_from_stock, credits_used_from_stock = try_to_deduct(remaining_profit, credits_from_stock)
-    form_1322_list += [PdfText(credits_used_from_stock, 2.9, 5.37)]
+    form_1322_list += [PdfText(credits_used_from_stock, 2.9, 5.37, empty_string_if_zero=True)]
 
     # Amount taxable
     amount_taxable = form_1325.total_profits - credits_used_from_prv - credits_used_from_stock
@@ -126,19 +135,23 @@ def generate_form1322_pdf(form_1325, input_file, output_file, tax_deduction='by_
 
     # Total sales
     form_1322_list += [PdfText(form_1325.total_sales, 4.4, 7.2)]
-
+    dividends_profits_including_deduction = None
     if tax_deduction == 'not_deducted_2':
-        if not dividend_list:
+        if not dividends:
             print('No dividends??? Please make sure that you did not receive any dividends!!!')
-        total_dividends = sum([rec.value_ils for rec in dividend_list])
+        total_dividends = dividends.get_total_ils()
         form_1322_list += [PdfText(total_dividends, 1.54, 8)]
 
-        # TODO: I can probably deduct dividend profits with deduct_credits_left_from_prev as well as stocks.
-        # If so - try that before using stock loss credits.
+        # Note: I cannot deduct dividend profits with deduct_credits_left_from_prev -
+        # only with stock losses from this year.
+
         remaining_profit, detuct_credits_left_from_stock, credits_used_from_stock = try_to_deduct(total_dividends,
                                                                                                   detuct_credits_left_from_stock)
         form_1322_list += [PdfText(credits_used_from_stock, 1.54, 8.46)]
         form_1322_list += [PdfText(detuct_credits_left_from_stock, 4.31, 9.56)]
+
+        dividends_profits_including_deduction = total_dividends - credits_used_from_stock
+        form_1322_list += [PdfText(dividends_profits_including_deduction, 1.54, 9.21)]
 
     iterate_and_draw(form_1322_list, can)
 
@@ -158,4 +171,51 @@ def generate_form1322_pdf(form_1325, input_file, output_file, tax_deduction='by_
     output.write(output_stream)
     output_stream.close()
 
-    return deduct_credits_left_from_prev, detuct_credits_left_from_stock
+    return deduct_credits_left_from_prev, detuct_credits_left_from_stock, dividends_profits_including_deduction
+
+form_1324_data = [PdfText(user_data['first-name'], 7.6, 2.77),
+                  PdfText(user_data['last-name'], 5.85, 2.77),
+                  PdfText(user_data['id-number'], 2.7, 2.77, space_between_chars=True),
+                  ]
+
+
+def generate_form1324_pdf(template_pdf, output_pdf, form1325, dividends, dividends_profits_including_deduction):
+
+
+    # Page 1
+    form_1324_page1_list = form_1324_data + [PdfText(dividends_profits_including_deduction, 1.89, 8.02)]
+    form_1324_page1_list += [PdfText(dividends.get_total_ils_deducted(), 0.44, 8.02)]
+    form_1324_page1_list += [PdfText(form1325.total_sales, 1.89, 10.37)]
+
+    # Page 2
+    form_1324_page2_list = [PdfText(dividends_profits_including_deduction, 1.95, 5.36)]
+    form_1324_page2_list += [XMark(3.93, 8.45)]
+    form_1324_page2_list += [PdfText(user_data['date'], 7.48, 9.48)]
+
+
+    packet = [None] * 2
+    output = PdfFileWriter()
+    for page_num, form_page_list in enumerate([form_1324_page1_list, form_1324_page2_list]):
+
+        packet[page_num] = io.BytesIO()
+        # create a new PDF with Reportlab
+        can = canvas.Canvas(packet[page_num], pagesize=letter)
+        can.setFont('Hebrew', 14)
+
+        iterate_and_draw(form_page_list, can)
+
+        can.save()
+        # move to the beginning of the StringIO buffer
+        packet[page_num].seek(0)
+        new_pdf = PdfFileReader(packet[page_num])
+        # read your existing PDF
+        existing_pdf = PdfFileReader(open(template_pdf, "rb"))
+
+        # add the "watermark" (which is the new pdf) on the existing page
+        page = existing_pdf.getPage(page_num)
+        page.mergePage(new_pdf.getPage(0))
+        output.addPage(page)
+    # finally, write "output" to a real file
+    output_stream = open(output_pdf, "wb")
+    output.write(output_stream)
+    output_stream.close()
