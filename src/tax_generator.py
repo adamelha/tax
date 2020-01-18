@@ -13,11 +13,11 @@ from pdf_helpers import generate_form1322_pdf, generate_form1324_pdf
 
 # Input parameters with default values:
 TAX_YEAR = 2019
-LOSS_FROM_PREV_YEARS = 1000
-IB_ACTIVITY_STATEMENT_CSV = 'U2903438_20190101_20191219.csv'  # IB activity statement CSV file for the entire year (must include trades and dividends)
+LOSS_FROM_PREV_YEARS = 0
+IB_ACTIVITY_STATEMENT_CSV = 'adam_ibkr_2019.csv'  # IB activity statement CSV file for the entire year (must include trades and dividends)
 GET_EXCHANGE_RATES_FROM_WEB = True  # If False - use the BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS file
 EXCHANGE_RATES_FROM_WEB_START_DATE = '30-12-2018'  # All trades must be no earlier than this date
-EXCHANGE_RATES_FROM_WEB_END_DATE = '30-12-2019' # All trades must be no later than this date
+EXCHANGE_RATES_FROM_WEB_END_DATE = '31-12-2019' # All trades must be no later than this date
 GENERATE_EXCEL_FILES = True  # Generate Excel files for appendixes. If False - just print the tables
 GENERATED_FILES_DIR = 'generated_files'  # Dir to generate the files to
 
@@ -184,7 +184,7 @@ def trades_parse():
             # We discard the part after the comma so the time is 0, as with the USD/ILS exchange file
             trade.date = datetime.datetime.strptime(row['Date/Time'].split(',')[0], '%Y-%m-%d')
             # Will be negative for sell transactions
-            trade.total_shares_num = int(row['Quantity'])
+            trade.total_shares_num = int(row['Quantity'].replace(',', ''))
             trade.shares_left = trade.total_shares_num
             # If symbol not in dic - create empty list for it
             if trade.symbol not in dic:
@@ -528,27 +528,32 @@ def print_broker_form1099_retrieval_instructions():
     print('In your Interactive Brokers account go to Reports > Tax > Tax Forms')
 
 def print_form1325_list(form1325):
-    tab = tt.Texttable()
-    header_list = Form1325Entry.to_header_list()
-    tab.header(header_list)
-    values_list = []
-    print('\nForm 1325 appendix 3 (nispah gimmel):')
-    for entry in form1325.entry_list:
-        #for row in zip(entry.to_list()):
-        tab.add_row(entry.to_list())
-        s = tab.draw()
-        values_list += [entry.to_list()]
-    print(s)
-    print(f'Total profits: {form1325.total_profits}\tTotal losses: {form1325.total_losses}')
-    print(f'Total sales {form1325.total_sales}')
-    if GENERATE_EXCEL_FILES:
-        workbook, worksheet, next_row = gen_excel_file(FORM_1325_APPENDIX_FILE_NAME, header_list, values_list, close_workbook=False)
-        # Skip row
-        next_row += 1
-        next_row = write_row(worksheet, next_row, ['Total profits', form1325.total_profits])
-        next_row = write_row(worksheet, next_row, ['Total losses', form1325.total_losses])
-        next_row = write_row(worksheet, next_row, ['Total sales', form1325.total_sales])
-        close_workbook(workbook)
+    if form1325.entry_list:
+        tab = tt.Texttable()
+        header_list = Form1325Entry.to_header_list()
+        tab.header(header_list)
+        values_list = []
+        print('\nForm 1325 appendix 3 (nispah gimmel):')
+        for entry in form1325.entry_list:
+            #for row in zip(entry.to_list()):
+            tab.add_row(entry.to_list())
+            s = tab.draw()
+            values_list += [entry.to_list()]
+        print(s)
+        print(f'Total profits: {form1325.total_profits}\tTotal losses: {form1325.total_losses}')
+        print(f'Total sales {form1325.total_sales}')
+        if GENERATE_EXCEL_FILES:
+            workbook, worksheet, next_row = gen_excel_file(FORM_1325_APPENDIX_FILE_NAME, header_list, values_list, close_workbook=False)
+            # Skip row
+            next_row += 1
+            next_row = write_row(worksheet, next_row, ['Total profits', form1325.total_profits])
+            next_row = write_row(worksheet, next_row, ['Total losses', form1325.total_losses])
+            next_row = write_row(worksheet, next_row, ['Total sales', form1325.total_sales])
+            close_workbook(workbook)
+    else:
+        print(f'Warning: No sales in stock found. If sales were actually made - make sure the corrct .csv file was\n'
+              f'provided (In this case {IB_ACTIVITY_STATEMENT_CSV} was provided as the input file). If the file is\n'
+              f'correct and up to date - check for a software bug (in the CSV parser).')
 
 
 
