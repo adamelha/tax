@@ -15,12 +15,12 @@ from pdf_helpers import generate_form1322_pdf, generate_form1324_pdf
 TAX_YEAR = 2019
 LOSS_FROM_PREV_YEARS = 0
 IB_ACTIVITY_STATEMENT_CSV = 'adam_ibkr_2019.csv'  # IB activity statement CSV file for the entire year (must include trades and dividends)
-GET_EXCHANGE_RATES_FROM_WEB = True  # If False - use the BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS file
+GET_EXCHANGE_RATES_FROM_WEB = False  # If False - use the BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS file
 EXCHANGE_RATES_FROM_WEB_START_DATE = '30-12-2018'  # All trades must be no earlier than this date
 EXCHANGE_RATES_FROM_WEB_END_DATE = '31-12-2019' # All trades must be no later than this date
 GENERATE_EXCEL_FILES = True  # Generate Excel files for appendixes. If False - just print the tables
 GENERATED_FILES_DIR = 'generated_files'  # Dir to generate the files to
-
+SPLIT_125_FORM = True
 
 # Constants:
 BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS = 'ExchangeRates.xlsx'
@@ -77,7 +77,10 @@ def dollar_ils_rate_parse_from_bank_of_israel_site():
 
         wb = o.Workbooks.Open(temp_filename)
         wb.ActiveSheet.SaveAs(filename, 51)
-        wb.Close()
+        try:
+            wb.Close()
+        except Exception:
+            print(f'Error closing Excel file: {filename}. Continuing with script anyway')
 
     temp_filename = os.getcwd() + '/' + '_tmp_exchanges.xls'
     filename = os.getcwd() + '/' + '_exchanges.xlsx'
@@ -255,6 +258,67 @@ def dividends_parse():
             symbol = row['Description'].split('(')[0]
             date = f'{row["Date"]} 00:00:00'
             dividend_helper_dict[f'{symbol}-{date}'].tax_deducted_usd = 0 - float(row['Amount'])
+
+    return dividend_list
+
+
+class Interest():
+    def __init__(self):
+        self.exchanges_dict = None
+        self.date = None
+        self.value_usd = 0
+    
+'''
+The dividends will be held in the following stucture:
+[
+    Interest1,
+    Interest2,
+    ...
+    Interestn,
+]
+'''
+def interest_parse():
+    interest_list = []
+    with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
+        id = []
+        for ln in ib_csv_file:
+            if ln.startswith("Interest,"):
+                id.append(ln)
+
+        s = '\n'.join(id)
+
+        csv_reader = csv.DictReader(io.StringIO(s))
+
+        for row in csv_reader:
+            # If end of interests
+            if row['Currency'] == 'Total':
+                break
+
+            interest = Interest()
+            interest.symbol = row['Description'].split('(')[0]
+            # row['Date/Time'] looks like this 2019-04-22
+            interest.date = datetime.datetime.strptime(row['Date'], '%Y-%m-%d')
+            interest.value_usd = float(row['Amount'])
+            interest_list.append(interest)
+
+    # Get tax deducted
+    # with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
+    #     id = []
+    #     for ln in ib_csv_file:
+    #         if ln.startswith("Withholding Tax,"):
+    #             id.append(ln)
+    #
+    #     s = '\n'.join(id)
+    #
+    #     csv_reader = csv.DictReader(io.StringIO(s))
+    #
+    #     for row in csv_reader:
+    #         # If end of dividends
+    #         if row['Currency'] == 'Total':
+    #             break
+    #         symbol = row['Description'].split('(')[0]
+    #         date = f'{row["Date"]} 00:00:00'
+    #         dividend_helper_dict[f'{symbol}-{date}'].tax_deducted_usd = 0 - float(row['Amount'])
 
     return dividend_list
 
@@ -608,11 +672,28 @@ class Dividends:
     def get_total_ils_deducted(self):
         return sum([div.tax_deducted_ils for div in self.dividend_list])
 
+class Interests:
+    def __init__(self, interest_list, dollar_ils_rate):
+        self.interest_list = []
+        for i in interest_list:
+            entry = Form1322AppendixEntry(i)
+            entry.populate(dollar_ils_rate)
+            self.interest_list.append(entry)
+
+    def get_total_usd(self):
+        return sum([div.value_usd for div in self.dividend_list])
+    def get_total_ils(self):
+        return sum([div.value_ils for div in self.dividend_list])
+    def get_total_ils_deducted(self):
+        return sum([div.tax_deducted_ils for div in self.dividend_list])
+
+
 def main():
     create_gen_dir()
     dollar_ils_rate = dollar_ils_rate_parse()
     trade_dic = trades_parse()
     dividends_list = dividends_parse()
+    interest_list = interest_parse()
     #print(trade_dic)
     form1325 = form1325_obj_create(trade_dic, dollar_ils_rate)
     dividends = Dividends(dividends_list, dollar_ils_rate)
@@ -631,19 +712,30 @@ def main():
     #                                 rec.date >= datetime.datetime(TAX_YEAR, 7, 1))]
     # deducted_by_broker_1322_list = [rec for rec in form1322_appendix_list if rec.tax_deducted_ils != 0]
 
-    form1325_1st_half = create_form1325_from_date_range(form1325, datetime.datetime(TAX_YEAR, 1, 1),
-                                                        datetime.datetime(TAX_YEAR, 7, 1))
-    form1325_2nd_half = create_form1325_from_date_range(form1325, datetime.datetime(TAX_YEAR, 7, 1),
-                                                        datetime.datetime(TAX_YEAR + 1, 1, 1))
+    if SPLIT_125_FORM:
+        form1325_1st_half = create_form1325_from_date_range(form1325, datetime.datetime(TAX_YEAR, 1, 1),
+                                                            datetime.datetime(TAX_YEAR, 7, 1))
+        form1325_2nd_half = create_form1325_from_date_range(form1325, datetime.datetime(TAX_YEAR, 7, 1),
+                                                            datetime.datetime(TAX_YEAR + 1, 1, 1))
 
-    loss_remaining_from_prev = LOSS_FROM_PREV_YEARS
-    loss_remaining_from_stock = form1325.total_losses * -1  # Make positive
-    # loss_remaining = generate_form1322_pdf(deducted_by_broker_1322_list, FORM_1322_TEMPLATE_PDF, FORM_1322_DEDUCTED_OUTPUT_PDF,
-    #                       tax_deduction='by_broker', loss_remaining=loss_remaining)
-    loss_remaining_from_prev, loss_remaining_from_stock, _ = generate_form1322_pdf(form1325_1st_half, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_1_OUTPUT_PDF,
-                          tax_deduction='not_deducted_1', credits_from_prev=loss_remaining_from_prev, credits_from_stock=loss_remaining_from_stock)
-    loss_remaining_from_prev, loss_remaining_from_stock, dividends_profits_including_deduction = generate_form1322_pdf(form1325_2nd_half, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF,
-                          tax_deduction='not_deducted_2', credits_from_prev=loss_remaining_from_prev, credits_from_stock=loss_remaining_from_stock, dividends=dividends)
+        loss_remaining_from_prev = LOSS_FROM_PREV_YEARS
+        loss_remaining_from_stock = form1325.total_losses * -1  # Make positive
+        # loss_remaining = generate_form1322_pdf(deducted_by_broker_1322_list, FORM_1322_TEMPLATE_PDF, FORM_1322_DEDUCTED_OUTPUT_PDF,
+        #                       tax_deduction='by_broker', loss_remaining=loss_remaining)
+        loss_remaining_from_prev, loss_remaining_from_stock, _ = generate_form1322_pdf(form1325_1st_half, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_1_OUTPUT_PDF,
+                              tax_deduction='not_deducted_1', credits_from_prev=loss_remaining_from_prev, credits_from_stock=loss_remaining_from_stock)
+        loss_remaining_from_prev, loss_remaining_from_stock, dividends_profits_including_deduction = generate_form1322_pdf(form1325_2nd_half, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF,
+                              tax_deduction='not_deducted_2', credits_from_prev=loss_remaining_from_prev, credits_from_stock=loss_remaining_from_stock, dividends=dividends)
+    else:
+        loss_remaining_from_prev = LOSS_FROM_PREV_YEARS
+        loss_remaining_from_stock = form1325.total_losses * -1  # Make positive
+        loss_remaining_from_prev, loss_remaining_from_stock, dividends_profits_including_deduction = generate_form1322_pdf(form1325,
+                                                                                       FORM_1322_TEMPLATE_PDF,
+                                                                                       FORM_1322_DEDUCTED_OUTPUT_PDF,
+                                                                                       tax_deduction='not_deducted_2',
+                                                                                       credits_from_prev=loss_remaining_from_prev,
+                                                                                       credits_from_stock=loss_remaining_from_stock,
+                                                                                       dividends=dividends)
 
     generate_form1324_pdf(FORM_1324_TEMPLATE_PDF, FORM_1324_OUTPUT_PDF, form1325, dividends, dividends_profits_including_deduction)
 
