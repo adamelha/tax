@@ -29,6 +29,7 @@ BANK_OF_ISRAEL_RATE_COL = 1
 IB_CODE_OPEN = 'O'
 IB_CODE_CLOSE = 'C'
 FORM_1322_FILE_NAME = 'Form1322'  # Excel file
+INTERESTS_FILE_NAME = 'Interests'
 FORM_1325_APPENDIX_FILE_NAME = 'Form1325_appendix'
 FORM_1322_TEMPLATE_PDF = 'itc1322_18.pdf'
 FORM_1322_DEDUCTED_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form1322_deducted.pdf')
@@ -37,6 +38,26 @@ FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form132
 
 FORM_1324_TEMPLATE_PDF = 'itc1324_18.pdf'
 FORM_1324_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form1324.pdf')
+
+def get_existing_exchange_date(date, dollar_ils_rate):
+    """
+    If exchange date does not exist in dict, there must be vacation in Israel
+    So try a day earlier - until one exists
+    :param date: date to search around
+    :param dollar_ils_rate: parsed exchanges dictionary
+    :return: datetime object as close as possible to date (but no later than date)
+             with a rate that exists in dollar_ils_rate
+    """
+
+    search_range = 5
+    exchange_date = None
+    for i in range(0, search_range):
+        if date - datetime.timedelta(i) in dollar_ils_rate:
+            exchange_date = date - datetime.timedelta(i)
+            break
+    if exchange_date is None:
+        raise Exception('USD/ILS exchange rate not found near closing date: {}'.format(date))
+    return exchange_date
 
 
 def dollar_ils_rate_parse_from_excel_file(file):
@@ -262,14 +283,36 @@ def dividends_parse():
     return dividend_list
 
 
-class Interest():
-    def __init__(self):
+class Interest:
+    def __init__(self, date, value_usd):
         self.exchanges_dict = None
-        self.date = None
-        self.value_usd = 0
+        self.date = date
+        self.value_usd = value_usd
+
+    @property
+    def value_ils(self):
+        if self.exchanges_dict is None:
+            raise Exception('Interest object not populated')
+        return self.value_usd * self.exchanges_dict[get_existing_exchange_date(self.date, self.exchanges_dict)]
+
+    def __str__(self):
+        return 'date\tvalue_usd\tvalue_ils\tusd_ils_rate\n' \
+               '<{}\t{}\t{}\t{}>'.format(self.date, self.value_usd, self.value_ils,
+                                         self.exchanges_dict[get_existing_exchange_date(self.date, self.exchanges_dict)])
+
+    def __repr__(self):
+        return self.__str__()
+
+    def to_list(self):
+        return [self.date, self.value_usd, self.value_ils,
+                self.exchanges_dict[get_existing_exchange_date(self.date, self.exchanges_dict)]]
+
+    def populate(self, usd_ils_rate_dict):
+        self.exchanges_dict = usd_ils_rate_dict
+
     
 '''
-The dividends will be held in the following stucture:
+The interests will be held in the following stucture:
 [
     Interest1,
     Interest2,
@@ -294,33 +337,13 @@ def interest_parse():
             if row['Currency'] == 'Total':
                 break
 
-            interest = Interest()
-            interest.symbol = row['Description'].split('(')[0]
+            # interest.symbol = row['Description'].split('(')[0]
             # row['Date/Time'] looks like this 2019-04-22
-            interest.date = datetime.datetime.strptime(row['Date'], '%Y-%m-%d')
-            interest.value_usd = float(row['Amount'])
-            interest_list.append(interest)
+            date = datetime.datetime.strptime(row['Date'], '%Y-%m-%d')
+            value_usd = float(row['Amount'])
+            interest_list.append(Interest(date, value_usd))
 
-    # Get tax deducted
-    # with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
-    #     id = []
-    #     for ln in ib_csv_file:
-    #         if ln.startswith("Withholding Tax,"):
-    #             id.append(ln)
-    #
-    #     s = '\n'.join(id)
-    #
-    #     csv_reader = csv.DictReader(io.StringIO(s))
-    #
-    #     for row in csv_reader:
-    #         # If end of dividends
-    #         if row['Currency'] == 'Total':
-    #             break
-    #         symbol = row['Description'].split('(')[0]
-    #         date = f'{row["Date"]} 00:00:00'
-    #         dividend_helper_dict[f'{symbol}-{date}'].tax_deducted_usd = 0 - float(row['Amount'])
-
-    return dividend_list
+    return interest_list
 
 class Form1325Entry():
     def __init__(self):
@@ -405,26 +428,6 @@ def _tax_to_pay(nominal_profit_loss, inflational_profit_loss):
 
     return taxable
 
-
-def get_existing_exchange_date(date, dollar_ils_rate):
-    '''
-    If exchange date does not exist in dict, there must be vacation in Israel
-    So try a day earlier - until one exists
-    :param date: date to search around
-    :param dollar_ils_rate: parsed exchanges dictionary
-    :return: datetime object as close as possible to date (but no later than date)
-             with a rate that exists in dollar_ils_rate
-    '''
-
-    search_range = 5
-    exchange_date = None
-    for i in range(0, search_range):
-        if date - datetime.timedelta(i) in dollar_ils_rate:
-            exchange_date = date - datetime.timedelta(i)
-            break
-    if exchange_date is None:
-        raise Exception('USD/ILS exchange rate not found near closing date: {}'.format(date))
-    return exchange_date
 
 def form1325_obj_create(trade_dic, dollar_ils_rate):
     '''
@@ -644,6 +647,28 @@ def print_form1322_appendix_list(dividends):
         next_row = write_row(worksheet, next_row, ['Total', '', total_usd, '', total_ils, total_ils_deducted])
         close_workbook(workbook)
 
+def print_interests_appendix(interests):
+    values_list = []
+    header_list = Interests.to_header_list()
+    tab = tt.Texttable()
+    tab.header(header_list)
+    print('\nInterests appendix:')
+    for interest in interests.interest_list:
+        # for row in zip(entry.to_list()):
+        tab.add_row(interest.to_list())
+        s = tab.draw()
+        values_list += [interest.to_list()]
+    print(s)
+    total_usd = interests.get_total_usd()
+    total_ils = interests.get_total_ils()
+    print(f'total_usd: {total_usd}\ttotal_ils: {total_ils}')
+
+    if GENERATE_EXCEL_FILES:
+        workbook, worksheet, next_row = gen_excel_file(INTERESTS_FILE_NAME, header_list, values_list, close_workbook=False)
+        #rows = ('total_usd: {total_usd}\ttotal_ils: {total_ils}\ttotal_ils_deducted: {total_ils_deducted}')
+        next_row = write_row(worksheet, next_row, ['Total', total_usd, total_ils])
+        close_workbook(workbook)
+
 def create_gen_dir():
     if GENERATE_EXCEL_FILES:
         if not os.path.exists(GENERATED_FILES_DIR):
@@ -673,19 +698,23 @@ class Dividends:
         return sum([div.tax_deducted_ils for div in self.dividend_list])
 
 class Interests:
-    def __init__(self, interest_list, dollar_ils_rate):
-        self.interest_list = []
+    def __init__(self, interest_list, usd_ils_rate_dict):
         for i in interest_list:
-            entry = Form1322AppendixEntry(i)
-            entry.populate(dollar_ils_rate)
-            self.interest_list.append(entry)
+            i.populate(usd_ils_rate_dict)
+        self.interest_list = interest_list
 
     def get_total_usd(self):
-        return sum([div.value_usd for div in self.dividend_list])
+        return sum([i.value_usd for i in self.interest_list])
     def get_total_ils(self):
-        return sum([div.value_ils for div in self.dividend_list])
-    def get_total_ils_deducted(self):
-        return sum([div.tax_deducted_ils for div in self.dividend_list])
+        return sum([i.value_ils for i in self.interest_list])
+
+    @staticmethod
+    def to_header_list():
+        return ['date', 'value_usd', 'value_ils', 'usd_ils_rate']
+
+
+def create_interests_excel():
+    pass
 
 
 def main():
@@ -694,9 +723,12 @@ def main():
     trade_dic = trades_parse()
     dividends_list = dividends_parse()
     interest_list = interest_parse()
+    interests = Interests(interest_list, dollar_ils_rate)
+
     #print(trade_dic)
     form1325 = form1325_obj_create(trade_dic, dollar_ils_rate)
     dividends = Dividends(dividends_list, dollar_ils_rate)
+    print_interests_appendix(interests)
     print_form1325_list(form1325)
     print_form1322_appendix_list(dividends)
     print_broker_form1099_retrieval_instructions()
@@ -724,20 +756,20 @@ def main():
         #                       tax_deduction='by_broker', loss_remaining=loss_remaining)
         loss_remaining_from_prev, loss_remaining_from_stock, _ = generate_form1322_pdf(form1325_1st_half, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_1_OUTPUT_PDF,
                               tax_deduction='not_deducted_1', credits_from_prev=loss_remaining_from_prev, credits_from_stock=loss_remaining_from_stock)
-        loss_remaining_from_prev, loss_remaining_from_stock, dividends_profits_including_deduction = generate_form1322_pdf(form1325_2nd_half, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF,
-                              tax_deduction='not_deducted_2', credits_from_prev=loss_remaining_from_prev, credits_from_stock=loss_remaining_from_stock, dividends=dividends)
+        loss_remaining_from_prev, loss_remaining_from_stock, dividends_and_interest_profits_including_deduction = generate_form1322_pdf(form1325_2nd_half, FORM_1322_TEMPLATE_PDF, FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF,
+                              tax_deduction='not_deducted_2', credits_from_prev=loss_remaining_from_prev, credits_from_stock=loss_remaining_from_stock, dividends=dividends, interests=interests)
     else:
         loss_remaining_from_prev = LOSS_FROM_PREV_YEARS
         loss_remaining_from_stock = form1325.total_losses * -1  # Make positive
-        loss_remaining_from_prev, loss_remaining_from_stock, dividends_profits_including_deduction = generate_form1322_pdf(form1325,
+        loss_remaining_from_prev, loss_remaining_from_stock, dividends_and_interest_profits_including_deduction = generate_form1322_pdf(form1325,
                                                                                        FORM_1322_TEMPLATE_PDF,
                                                                                        FORM_1322_DEDUCTED_OUTPUT_PDF,
                                                                                        tax_deduction='not_deducted_2',
                                                                                        credits_from_prev=loss_remaining_from_prev,
                                                                                        credits_from_stock=loss_remaining_from_stock,
-                                                                                       dividends=dividends)
+                                                                                       dividends=dividends, interests=interests)
 
-    generate_form1324_pdf(FORM_1324_TEMPLATE_PDF, FORM_1324_OUTPUT_PDF, form1325, dividends, dividends_profits_including_deduction)
+    generate_form1324_pdf(FORM_1324_TEMPLATE_PDF, FORM_1324_OUTPUT_PDF, form1325, dividends, dividends_and_interest_profits_including_deduction)
 
     print(f'Total loss from previous year remaining for the next tax year: {loss_remaining_from_prev }')
     print(f'Total loss from stock remaining for the next tax year: {loss_remaining_from_stock}')

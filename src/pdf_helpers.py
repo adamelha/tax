@@ -100,7 +100,8 @@ def try_to_deduct(deduct_from, detuct_credits):
 # Return what is left from losses - to be inserted as loss_from_previous in next call
 # Return <credits_left_from_prev, credits_left_from_stock)
 def generate_form1322_pdf(form_1325, input_file, output_file, tax_deduction='by_broker', is_foreign_asset=False,
-                          credits_from_prev=0, credits_from_stock=0, form1322_appendix_list=None, dividends=None):
+                          credits_from_prev=0, credits_from_stock=0, form1322_appendix_list=None, dividends=None,
+                          interests=None):
     '''tax_deduction must be in ('by_broker', 'not_deducted_1', 'not_deducted_2')'''
     if tax_deduction not in ('by_broker', 'not_deducted_1', 'not_deducted_2'):
         raise Exception("tax_deduction arg must be one of ('by_broker', 'not_deducted_1', 'not_deducted_2')")
@@ -140,23 +141,27 @@ def generate_form1322_pdf(form_1325, input_file, output_file, tax_deduction='by_
 
     # Total sales
     form_1322_list += [PdfText(form_1325.total_sales, 4.4, 7.2)]
-    dividends_profits_including_deduction = None
+    dividends_and_interest_profits_including_deduction = None
     if tax_deduction == 'not_deducted_2':
         if not dividends:
             print('No dividends??? Please make sure that you did not receive any dividends!!!')
+        if not interests:
+            print('No interest??? Please make sure that you did not receive any interest on cash!!!')
+        total_cash_interest = interests.get_total_ils()
         total_dividends = dividends.get_total_ils()
-        form_1322_list += [PdfText(total_dividends, 1.54, 8)]
+        total_dividends_and_cash_interest = total_cash_interest + total_dividends
+        form_1322_list += [PdfText(total_dividends_and_cash_interest, 1.54, 8)]
 
         # Note: I cannot deduct dividend profits with deduct_credits_left_from_prev -
         # only with stock losses from this year.
 
-        remaining_profit, detuct_credits_left_from_stock, credits_used_from_stock = try_to_deduct(total_dividends,
+        remaining_profit, detuct_credits_left_from_stock, credits_used_from_stock = try_to_deduct(total_dividends_and_cash_interest,
                                                                                                   detuct_credits_left_from_stock)
         form_1322_list += [PdfText(credits_used_from_stock, 1.54, 8.46)]
         form_1322_list += [PdfText(detuct_credits_left_from_stock, 4.31, 9.56)]
 
-        dividends_profits_including_deduction = total_dividends - credits_used_from_stock
-        form_1322_list += [PdfText(dividends_profits_including_deduction, 1.54, 9.21)]
+        dividends_and_interest_profits_including_deduction = total_dividends_and_cash_interest - credits_used_from_stock
+        form_1322_list += [PdfText(dividends_and_interest_profits_including_deduction, 1.54, 9.21)]
 
     iterate_and_draw(form_1322_list, can)
 
@@ -176,7 +181,7 @@ def generate_form1322_pdf(form_1325, input_file, output_file, tax_deduction='by_
     output.write(output_stream)
     output_stream.close()
 
-    return deduct_credits_left_from_prev, detuct_credits_left_from_stock, dividends_profits_including_deduction
+    return deduct_credits_left_from_prev, detuct_credits_left_from_stock, dividends_and_interest_profits_including_deduction
 
 form_1324_data = [PdfText(user_data['first-name'], 7.6, 2.77),
                   PdfText(user_data['last-name'], 5.85, 2.77),
