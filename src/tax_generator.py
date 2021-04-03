@@ -1,5 +1,5 @@
 from copy import deepcopy
-from xlrd import open_workbook
+from xlrd import open_workbook, XL_CELL_TEXT, XL_CELL_DATE  # pip install xlrd==1.2.0
 from xlrd import xldate
 import csv
 import datetime
@@ -12,12 +12,15 @@ import io
 from pdf_helpers import generate_form1322_pdf, generate_form1324_pdf
 
 # Input parameters with default values:
-TAX_YEAR = 2019
+TAX_YEAR = 2020
 LOSS_FROM_PREV_YEARS = 0
 IB_ACTIVITY_STATEMENT_CSV = 'adam_ibkr_2019.csv'  # IB activity statement CSV file for the entire year (must include trades and dividends)
+IB_ACTIVITY_STATEMENT_CSV_LIST = [os.path.join('annual-statements', '2019.csv'),
+                                  os.path.join('annual-statements', '2020.csv')]
+IB_ACTIVITY_STATEMENT_CSV_OF_TAX_YEAR = os.path.join('annual-statements', '2020.csv')
 GET_EXCHANGE_RATES_FROM_WEB = False  # If False - use the BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS file
 EXCHANGE_RATES_FROM_WEB_START_DATE = '30-12-2018'  # All trades must be no earlier than this date
-EXCHANGE_RATES_FROM_WEB_END_DATE = '31-12-2019' # All trades must be no later than this date
+EXCHANGE_RATES_FROM_WEB_END_DATE = '31-12-2020'  # All trades must be no later than this date
 GENERATE_EXCEL_FILES = True  # Generate Excel files for appendixes. If False - just print the tables
 GENERATED_FILES_DIR = 'generated_files'  # Dir to generate the files to
 SPLIT_125_FORM = True
@@ -75,8 +78,14 @@ def dollar_ils_rate_parse_from_excel_file(file):
             # If exception converting the rate column to float -
             # we haven't reached the actual data yet. Go to next row
             continue
+        if date_cell.ctype == XL_CELL_TEXT:
+            date_str = date_cell.value
+            datetime_obj = datetime.datetime.strptime(date_str, '%d/%m/%Y')
+        elif date_cell.ctype == XL_CELL_DATE:
+            datetime_obj = xldate.xldate_as_datetime(date_cell.value, book.datemode)
+        else:
+            raise Exception('Unknown cell type when parsing exchanges')
 
-        datetime_obj = xldate.xldate_as_datetime(date_cell.value, book.datemode)
         dic[datetime_obj] = rate
 
     return dic
@@ -171,51 +180,52 @@ The trades will be held in the following data structure:
     ]
 }
 '''
-def trades_parse():
+def trades_parse(statements):
     dic = dict()
     transaction_list = []
-    with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
-        id = []
-        for ln in ib_csv_file:
-            if ln.startswith("Trades,"):
-                id.append(ln)
+    for statement_csv in statements:
+        with open(statement_csv) as ib_csv_file:
+            id = []
+            for ln in ib_csv_file:
+                if ln.startswith("Trades,"):
+                    id.append(ln)
 
-        s = '\n'.join(id)
+            s = '\n'.join(id)
 
-        csv_reader = csv.DictReader(io.StringIO(s))
+            csv_reader = csv.DictReader(io.StringIO(s))
 
-        for row in csv_reader:
-            try:
-                open_close = row['Code']
-            except Exception as e:
-                print(e)
-                continue
+            for row in csv_reader:
+                try:
+                    open_close = row['Code']
+                except Exception as e:
+                    print(e)
+                    continue
 
-            if open_close == IB_CODE_OPEN or IB_CODE_OPEN + ';' in open_close:
-                trade = TradeOpen()
-            elif open_close == IB_CODE_CLOSE:
-                trade = TradeClose()
-                trade.realized = float(row['Realized P/L'])
-            else:
-                continue
+                if open_close == IB_CODE_OPEN or IB_CODE_OPEN + ';' in open_close:
+                    trade = TradeOpen()
+                elif open_close == IB_CODE_CLOSE:
+                    trade = TradeClose()
+                    trade.realized = float(row['Realized P/L'])
+                else:
+                    continue
 
-            trade.symbol = row['Symbol']
-            # Commssion is represented by a negative number - store it as positive
-            # because we later add it to the original price
-            trade.commission = abs(float(row['Comm/Fee']))
-            trade.transaction_price = float(row['T. Price'])
-            # row['Date/Time'] looks like this 2019-04-22, 14:04:29
-            # We discard the part after the comma so the time is 0, as with the USD/ILS exchange file
-            trade.date = datetime.datetime.strptime(row['Date/Time'].split(',')[0], '%Y-%m-%d')
-            # Will be negative for sell transactions
-            trade.total_shares_num = int(row['Quantity'].replace(',', ''))
-            trade.shares_left = trade.total_shares_num
-            # If symbol not in dic - create empty list for it
-            if trade.symbol not in dic:
-                dic[trade.symbol] = []
+                trade.symbol = row['Symbol']
+                # Commssion is represented by a negative number - store it as positive
+                # because we later add it to the original price
+                trade.commission = abs(float(row['Comm/Fee']))
+                trade.transaction_price = float(row['T. Price'])
+                # row['Date/Time'] looks like this 2019-04-22, 14:04:29
+                # We discard the part after the comma so the time is 0, as with the USD/ILS exchange file
+                trade.date = datetime.datetime.strptime(row['Date/Time'].split(',')[0], '%Y-%m-%d')
+                # Will be negative for sell transactions
+                trade.total_shares_num = int(row['Quantity'].replace(',', ''))
+                trade.shares_left = trade.total_shares_num
+                # If symbol not in dic - create empty list for it
+                if trade.symbol not in dic:
+                    dic[trade.symbol] = []
 
-            # Append the trade to the list of trades for this symbol
-            dic[trade.symbol].append(trade)
+                # Append the trade to the list of trades for this symbol
+                dic[trade.symbol].append(trade)
 
     return dic
 
@@ -238,7 +248,7 @@ The dividends will be held in the following stucture:
 def dividends_parse():
     dividend_list = []
     dividend_helper_dict = {}
-    with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
+    with open(IB_ACTIVITY_STATEMENT_CSV_OF_TAX_YEAR) as ib_csv_file:
         id = []
         for ln in ib_csv_file:
             if ln.startswith("Dividends,"):
@@ -262,7 +272,7 @@ def dividends_parse():
             dividend_helper_dict[f'{dividend.symbol}-{dividend.date}'] = dividend
 
     # Get tax deducted
-    with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
+    with open(IB_ACTIVITY_STATEMENT_CSV_OF_TAX_YEAR) as ib_csv_file:
         id = []
         for ln in ib_csv_file:
             if ln.startswith("Withholding Tax,"):
@@ -322,7 +332,7 @@ The interests will be held in the following stucture:
 '''
 def interest_parse():
     interest_list = []
-    with open(IB_ACTIVITY_STATEMENT_CSV) as ib_csv_file:
+    with open(IB_ACTIVITY_STATEMENT_CSV_OF_TAX_YEAR) as ib_csv_file:
         id = []
         for ln in ib_csv_file:
             if ln.startswith("Interest,"):
@@ -619,7 +629,7 @@ def print_form1325_list(form1325):
             close_workbook(workbook)
     else:
         print(f'Warning: No sales in stock found. If sales were actually made - make sure the corrct .csv file was\n'
-              f'provided (In this case {IB_ACTIVITY_STATEMENT_CSV} was provided as the input file). If the file is\n'
+              f'provided (In this case {IB_ACTIVITY_STATEMENT_CSV_OF_TAX_YEAR} was provided as the input file). If the file is\n'
               f'correct and up to date - check for a software bug (in the CSV parser).')
 
 
@@ -720,7 +730,7 @@ def create_interests_excel():
 def main():
     create_gen_dir()
     dollar_ils_rate = dollar_ils_rate_parse()
-    trade_dic = trades_parse()
+    trade_dic = trades_parse(IB_ACTIVITY_STATEMENT_CSV_LIST)
     dividends_list = dividends_parse()
     interest_list = interest_parse()
     interests = Interests(interest_list, dollar_ils_rate)
@@ -776,5 +786,6 @@ def main():
 
 if __name__ == "__main__":
 
-
+    date_str = '31/12/2018'
+    date_time_obj = datetime.datetime.strptime(date_str, '%d/%m/%Y')
     main()
