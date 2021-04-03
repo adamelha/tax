@@ -72,6 +72,35 @@ def test_loss_positive_rate_change():
     check_expected_profit_loss(expected_profit_loss, form1325.entry_list[0].profit_loss)
     check_entries_math(form1325.entry_list)
 
+def test_loss_positive_rate_change_share_split():
+    '''
+    from example here: https://fintranslator.com/israel-tax-schedules-passive-income-foreign-broker/
+
+    But here we create a 1:4 share split between buy and sell.
+    '''
+    dollar_ils_rate = {}
+
+    open_date = date(2020, 1, 1)
+    split_date = date(2020, 2, 2)
+    close_date = date(2020, 3, 3)
+
+    dollar_ils_rate[open_date] = 3.558
+    dollar_ils_rate[close_date] = 3.568
+
+    expected_profit_loss = -25.81
+    trade_dic = {
+        'TEST' : [
+            TradeOpen(symbol='TEST', transaction_price=151.92, date=open_date, total_shares_num=1, shares_left=1),
+            TradeClose(symbol='TEST', transaction_price=144.26, date=close_date, total_shares_num=-1, shares_left=-1),
+        ]
+    }
+
+    form1325 = form1325_obj_create(trade_dic, dollar_ils_rate)
+    print_form1325_list(form1325)
+
+    check_expected_profit_loss(expected_profit_loss, form1325.entry_list[0].profit_loss)
+    check_entries_math(form1325.entry_list)
+
 def test_profit_positive_rate_change():
     '''
     from example here: https://fintranslator.com/israel-tax-schedules-passive-income-foreign-broker/

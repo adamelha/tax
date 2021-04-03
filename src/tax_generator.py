@@ -1,3 +1,4 @@
+import re
 from copy import deepcopy
 from xlrd import open_workbook, XL_CELL_TEXT, XL_CELL_DATE  # pip install xlrd==1.2.0
 from xlrd import xldate
@@ -21,7 +22,7 @@ IB_ACTIVITY_STATEMENT_CSV_OF_TAX_YEAR = os.path.join('annual-statements', '2020.
 GET_EXCHANGE_RATES_FROM_WEB = False  # If False - use the BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS file
 EXCHANGE_RATES_FROM_WEB_START_DATE = '30-12-2018'  # All trades must be no earlier than this date
 EXCHANGE_RATES_FROM_WEB_END_DATE = '31-12-2020'  # All trades must be no later than this date
-GENERATE_EXCEL_FILES = False  # Generate Excel files for appendixes. If False - just print the tables
+GENERATE_EXCEL_FILES = True  # Generate Excel files for appendixes. If False - just print the tables
 GENERATED_FILES_DIR = 'generated_files'  # Dir to generate the files to
 SPLIT_125_FORM = True
 
@@ -41,6 +42,7 @@ FORM_1322_NOT_DEDUCTED_2_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form132
 
 FORM_1324_TEMPLATE_PDF = 'itc1324_18.pdf'
 FORM_1324_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form1324.pdf')
+
 
 def get_existing_exchange_date(date, dollar_ils_rate):
     """
@@ -126,10 +128,12 @@ def dollar_ils_rate_parse_from_bank_of_israel_site():
     fix_corrupted_excel_file(temp_filename, filename)
     return dollar_ils_rate_parse_from_excel_file(filename)
 
+
 def dollar_ils_rate_parse():
     if not GET_EXCHANGE_RATES_FROM_WEB:
         return dollar_ils_rate_parse_from_excel_file(BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS)
     return dollar_ils_rate_parse_from_bank_of_israel_site()
+
 
 class Trade():
     def __init__(self):
@@ -139,8 +143,10 @@ class Trade():
         self.date = None
         self.total_shares_num = 0
         self.shares_left = 0
+
     def __str__(self):
         return 'Trade: symbol:{}, date:{} comm:{}, price:{}'.format(self.symbol, self.date, self.commission, self.transaction_price)
+
 
 class TradeOpen(Trade):
     def __init__(self, **kwargs):
@@ -149,6 +155,7 @@ class TradeOpen(Trade):
             setattr(self, key, value)
     def __repr__(self):
         return self.__str__()
+
 
 class TradeClose(Trade):
     def __init__(self, **kwargs):
@@ -160,8 +167,50 @@ class TradeClose(Trade):
 
     def __str__(self):
         return '{}, realized:{}'.format(super().__str__(), self.realized)
+
     def __repr__(self):
         return self.__str__()
+
+
+class StockSplit:
+    def __init__(self, symbol, date, ratio):
+        self.symbol = symbol
+        self.date = date
+        self.ratio = int(ratio)
+
+    def __str__(self):
+        return f'(StockSplit: {self.symbol}, {self.date}, {self.ratio})'
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class AllStockSplits:
+    def __init__(self):
+        self._d = {}
+
+    def add_stock_split(self, stock_split):
+        def sort_key(stock_split):
+            return stock_split.date
+
+        if stock_split.symbol not in self._d:
+            self._d[stock_split.symbol] = [stock_split]
+        else:
+            self._d[stock_split.symbol].append(stock_split)
+            self._d[stock_split.symbol].sort(key=sort_key)
+
+    def get_stock_splits_for_symbol(self, symbol):
+        try:
+            return self._d[symbol]
+        except KeyError:
+            return []
+
+    def __str__(self):
+        return f'{self._d}'
+
+    def __repr__(self):
+        return self.__str__()
+
 
 '''
 The trades will be held in the following data structure:
@@ -355,6 +404,42 @@ def interest_parse():
 
     return interest_list
 
+
+def stock_splits_parse():
+    splits = AllStockSplits()
+    with open(IB_ACTIVITY_STATEMENT_CSV_OF_TAX_YEAR) as ib_csv_file:
+        id = []
+        for ln in ib_csv_file:
+            if ln.startswith("Corporate Actions,"):
+                id.append(ln)
+
+        s = '\n'.join(id)
+
+        csv_reader = csv.DictReader(io.StringIO(s))
+
+        for row in csv_reader:
+            # If end of interests
+            if row['Asset Category'] == 'Total':
+                break
+
+            try:
+                # interest.symbol = row['Description'].split('(')[0]
+                # row['Date/Time'] looks like this 2019-04-22
+                date = datetime.datetime.strptime(row['Report Date'], '%Y-%m-%d')
+                r = r"([A-Z]+)\(.+Split (\d+) for (\d+)"
+                m = re.match(r, row['Description'])
+                symbol = m.groups()[0]
+                after_split = int(m.groups()[1])
+                before_split = int(m.groups()[2])
+
+                stock_split = StockSplit(symbol, date, after_split / before_split)
+                splits.add_stock_split(stock_split)
+            except Exception as e:
+                print(f'Ignoring Corporate Actions row: {row}. Is not stock split')
+                pass
+
+    return splits
+
 class Form1325Entry():
     def __init__(self):
         self.symbol = ''
@@ -439,7 +524,19 @@ def _tax_to_pay(nominal_profit_loss, inflational_profit_loss):
     return taxable
 
 
-def form1325_obj_create(trade_dic, dollar_ils_rate):
+def handle_stock_split(opening_trade, closing_trade, stock_splits):
+    symbol = opening_trade.symbol
+    splits_for_symbol = stock_splits.get_stock_splits_for_symbol(symbol)
+    x = 1
+    for split in splits_for_symbol:
+        if split.date > opening_trade.date and split.date < closing_trade.date:
+            opening_trade.shares_left *= split.ratio
+            opening_trade.total_shares_num *= split.ratio
+            opening_trade.transaction_price /= split.ratio
+
+
+
+def form1325_obj_create(trade_dic, dollar_ils_rate, stock_splits=None):
     '''
     Create Tofes 1325 nispah hey (5)
     Summery of selling of stock which were not taxed
@@ -449,6 +546,9 @@ def form1325_obj_create(trade_dic, dollar_ils_rate):
     '''
     # list of all lists of tuples of symbol. Each list of tuples corresponds to
     # one form1325 entry
+    if stock_splits is None:
+        stock_splits = AllStockSplits()
+
     opening_shares_lists_for_all_symbols = []
     for symbol, trade_list in trade_dic.items():
         # Go to last transaction that is a closing position
@@ -471,6 +571,8 @@ def form1325_obj_create(trade_dic, dollar_ils_rate):
                         if opening_trade.shares_left == 0:
                             continue
                         covered = 0
+
+                        handle_stock_split(opening_trade, closing_trade, stock_splits)
                         # If opening trade shares cover all closing trade shares
                         if opening_trade.shares_left + closing_trade.shares_left >= 0:
                             covered += abs(closing_trade.shares_left)
@@ -734,9 +836,10 @@ def main():
     dividends_list = dividends_parse()
     interest_list = interest_parse()
     interests = Interests(interest_list, dollar_ils_rate)
+    stock_splits = stock_splits_parse()
 
-    #print(trade_dic)
-    form1325 = form1325_obj_create(trade_dic, dollar_ils_rate)
+    print(f'stock splits: {stock_splits}')
+    form1325 = form1325_obj_create(trade_dic, dollar_ils_rate, stock_splits)
     dividends = Dividends(dividends_list, dollar_ils_rate)
     print_interests_appendix(interests)
     print_form1325_list(form1325)
@@ -783,9 +886,3 @@ def main():
 
     print(f'Total loss from previous year remaining for the next tax year: {loss_remaining_from_prev }')
     print(f'Total loss from stock remaining for the next tax year: {loss_remaining_from_stock}')
-
-if __name__ == "__main__":
-
-    date_str = '31/12/2018'
-    date_time_obj = datetime.datetime.strptime(date_str, '%d/%m/%Y')
-    main()
