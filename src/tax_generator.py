@@ -4,12 +4,12 @@ from xlrd import xldate
 import csv
 import datetime
 import texttable as tt
-from excel_helper import gen_excel_file, write_row, close_workbook
+from .excel_helper import gen_excel_file, write_row, close_workbook
 import os
 import requests
 import win32com.client  # pip install pypiwin32
 import io
-from pdf_helpers import generate_form1322_pdf, generate_form1324_pdf
+from .pdf_helpers import generate_form1322_pdf, generate_form1324_pdf
 
 # Input parameters with default values:
 TAX_YEAR = 2020
@@ -21,7 +21,7 @@ IB_ACTIVITY_STATEMENT_CSV_OF_TAX_YEAR = os.path.join('annual-statements', '2020.
 GET_EXCHANGE_RATES_FROM_WEB = False  # If False - use the BANK_OF_ISRAEL_DOLLAR_ILS_EXCHANGE_XLS file
 EXCHANGE_RATES_FROM_WEB_START_DATE = '30-12-2018'  # All trades must be no earlier than this date
 EXCHANGE_RATES_FROM_WEB_END_DATE = '31-12-2020'  # All trades must be no later than this date
-GENERATE_EXCEL_FILES = True  # Generate Excel files for appendixes. If False - just print the tables
+GENERATE_EXCEL_FILES = False  # Generate Excel files for appendixes. If False - just print the tables
 GENERATED_FILES_DIR = 'generated_files'  # Dir to generate the files to
 SPLIT_125_FORM = True
 

@@ -46,7 +46,7 @@ def write_row(worksheet, row_number, values_list):
 
 # Return (worksheet/None, next_row)
 def gen_excel_file(file_name, header_list, values_matrix, close_workbook=True):
-    from tax_generator import GENERATED_FILES_DIR
+    from .tax_generator import GENERATED_FILES_DIR
     next_row = 0
     complete_filename = os.path.join(GENERATED_FILES_DIR, file_name + '.xlsx')
 

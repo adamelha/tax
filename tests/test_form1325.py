@@ -1,6 +1,6 @@
-from src.tax_generator import form1325_obj_create, print_form1325_list
-from src.tax_generator import TradeOpen, TradeClose
-from src.tax_generator import _tax_to_pay
+from ..src.tax_generator import form1325_obj_create, print_form1325_list
+from ..src.tax_generator import TradeOpen, TradeClose
+from ..src.tax_generator import _tax_to_pay
 from datetime import date, timedelta
 from itertools import count
 
@@ -62,16 +62,15 @@ def test_loss_positive_rate_change():
     trade_dic = {
         'TEST' : [
             TradeOpen(symbol='TEST', transaction_price=151.92, date=open_date, total_shares_num=1, shares_left=1),
-            TradeClose(symbol='TEST', transaction_price=(144.26), date=close_date, total_shares_num=-1, shares_left=-1),
+            TradeClose(symbol='TEST', transaction_price=144.26, date=close_date, total_shares_num=-1, shares_left=-1),
         ]
     }
 
     form1325 = form1325_obj_create(trade_dic, dollar_ils_rate)
-    print_form1325_list(form1325.entry_list)
+    print_form1325_list(form1325)
 
     check_expected_profit_loss(expected_profit_loss, form1325.entry_list[0].profit_loss)
     check_entries_math(form1325.entry_list)
-    #assert False
 
 def test_profit_positive_rate_change():
     '''
@@ -97,7 +96,7 @@ def test_profit_positive_rate_change():
     }
 
     form1325 = form1325_obj_create(trade_dic, dollar_ils_rate)
-    print_form1325_list(form1325.entry_list)
+    print_form1325_list(form1325)
     check_expected_profit_loss(expected_profit_loss, form1325.entry_list[0].profit_loss)
     check_entries_math(form1325.entry_list)
     #assert False
@@ -166,7 +165,7 @@ def test_laradar_example(open_rate, close_rate, open_price_usd, close_price_usd,
     }
 
     form1325 = form1325_obj_create(trade_dic, dollar_ils_rate)
-    print_form1325_list(form1325.entry_list)
+    print_form1325_list(form1325)
     check_expected_profit_loss(expected['profit_loss'], form1325.entry_list[0].profit_loss)
     check_entries_math(form1325.entry_list)
     #assert False
@@ -347,7 +346,7 @@ def test_multiple_buy_sell(test_trade_list_dic):
     print(trade_dic)
 
     form1325 = form1325_obj_create(trade_dic, dollar_ils_rate)
-    print_form1325_list(form1325.entry_list)
+    print_form1325_list(form1325)
 
     assert len(form1325.entry_list) == len(test_trade_list_dic['expected_profit_loss'])
 
