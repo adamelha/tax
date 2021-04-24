@@ -9,20 +9,13 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from PyPDF2 import PdfFileWriter, PdfFileReader
 
+from .user_data_helper import user_data
 
 pdfmetrics.registerFont(TTFont('Hebrew', 'Arial.ttf'))
 
-f = os.path.join(os.path.dirname(os.path.realpath(__file__)),'config.json')
-with open(f, encoding='utf-8') as json_data:
-    user_data_dict = json.load(json_data)
-    print(user_data_dict)
-
-user_data = {k: user_data_dict[k]['value'] for k in user_data_dict.keys() }
-user_data['name'] = user_data['first-name'] + ' ' + user_data['last-name']
-
 class PdfText:
     def __init__(self, text, x, y, space_between_chars=False, direction=None, empty_string_if_zero=False, reverse_text=True):
-        '''For coordinante system where origin is top left and x and y are in inches.'''
+        '''For coordinate system where origin is top left and x and y are in inches.'''
         self.x = x * inch
         self.y = y * inch
         if type(text) is str:

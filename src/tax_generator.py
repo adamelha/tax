@@ -32,9 +32,12 @@ BANK_OF_ISRAEL_DATE_COL = 0
 BANK_OF_ISRAEL_RATE_COL = 1
 IB_CODE_OPEN = 'O'
 IB_CODE_CLOSE = 'C'
-FORM_1322_FILE_NAME = 'Form1322'  # Excel file
-INTERESTS_FILE_NAME = 'Interests'
-FORM_1325_APPENDIX_FILE_NAME = 'Form1325_appendix'
+FORM_1322_FILE_NAME = 'dividends'  # Excel file
+DIVIDENDS_FILE_DESCRIPTION = 'סיכום דיבידנדים'
+INTERESTS_FILE_NAME = 'interests'
+INTEREST_FILE_DESCRIPTION = 'סיכום ריבית'
+FORM_1325_APPENDIX_FILE_NAME = 'stocks_and_summary'
+STOCK_FILE_DESCRIPTION = 'סיכום ניירות ערך'
 FORM_1322_TEMPLATE_PDF = 'itc1322_18.pdf'
 FORM_1322_DEDUCTED_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form1322_deducted.pdf')
 FORM_1322_NOT_DEDUCTED_1_OUTPUT_PDF = os.path.join(GENERATED_FILES_DIR, 'Form1322_not_deducted_1st_half.pdf')
@@ -620,7 +623,7 @@ def form1325_obj_create(trade_dic, dollar_ils_rate, stock_splits=None):
             form_entry.orig_price_ils = tup[1].transaction_price * tup[2] * dollar_ils_rate[buy_date]
             print(f'orig_price_ils = {form_entry.orig_price_ils}')
             form_entry.orig_price_ils += (tup[0].commission * dollar_ils_rate[sell_date] + tup[1].commission * dollar_ils_rate[buy_date])
-            print(f'orig_price_ils = {form_entry.orig_price_ils}')
+            print(f'orig_price_ils after all transaction commissions = {form_entry.orig_price_ils}')
             # zero out the commissions so that we do not use them for other entries envolving this trade.
             # For instance buy 1, buy 1, sell 2: we split the sell trade to 2 entries, so we make sure
             # we only add the commission to the price once
@@ -706,7 +709,7 @@ def print_broker_form1099_retrieval_instructions():
     print('\nBroker tax form 1099:')
     print('In your Interactive Brokers account go to Reports > Tax > Tax Forms')
 
-def print_form1325_list(form1325):
+def print_form1325_list(form1325, form1325_1st_half, form1325_2nd_half, dividends, interests, loss_remaining_from_stock):
     if form1325.entry_list:
         tab = tt.Texttable()
         header_list = Form1325Entry.to_header_list()
@@ -722,12 +725,23 @@ def print_form1325_list(form1325):
         print(f'Total profits: {form1325.total_profits}\tTotal losses: {form1325.total_losses}')
         print(f'Total sales {form1325.total_sales}')
         if GENERATE_EXCEL_FILES:
-            workbook, worksheet, next_row = gen_excel_file(FORM_1325_APPENDIX_FILE_NAME, header_list, values_list, close_workbook=False)
+            workbook, worksheet, next_row = gen_excel_file(FORM_1325_APPENDIX_FILE_NAME, header_list, values_list,
+                                                           STOCK_FILE_DESCRIPTION, close_workbook=False)
             # Skip row
             next_row += 1
-            next_row = write_row(worksheet, next_row, ['Total profits', form1325.total_profits])
-            next_row = write_row(worksheet, next_row, ['Total losses', form1325.total_losses])
-            next_row = write_row(worksheet, next_row, ['Total sales', form1325.total_sales])
+            next_row = write_row(worksheet, next_row, ['Total profits', form1325.total_profits], workbook)
+            next_row = write_row(worksheet, next_row, ['Total losses', form1325.total_losses], workbook)
+            next_row = write_row(worksheet, next_row, ['Total sales', form1325.total_sales], workbook)
+
+            next_row += 2
+            next_row = write_row(worksheet, next_row, ['מכירות ינואר-יוני', form1325_1st_half.total_sales], workbook, highlighted_cols=[1])
+            next_row = write_row(worksheet, next_row, ['מכירות יולי-דצמבר', form1325_2nd_half.total_sales], workbook, highlighted_cols=[1])
+            next_row = write_row(worksheet, next_row, ['סכום מכירות', form1325.total_sales], workbook)
+
+            next_row += 2
+            next_row = write_row(worksheet, next_row, ['הפסדים להעברה מני"ע', 'רווח-הפסד ני"ע', 'סה"כ ריבית', 'סה"כ דיבידנדים'], workbook)
+            next_row = write_row(worksheet, next_row, [loss_remaining_from_stock, form1325.total_profits + form1325.total_losses ,
+                                                       interests.get_total_ils(), dividends.get_total_ils()], workbook, highlighted_cols=[0])
             close_workbook(workbook)
     else:
         print(f'Warning: No sales in stock found. If sales were actually made - make sure the corrct .csv file was\n'
@@ -754,9 +768,11 @@ def print_form1322_appendix_list(dividends):
     print(f'total_usd: {total_usd}\ttotal_ils: {total_ils}\ttotal_ils_deducted: {total_ils_deducted}')
 
     if GENERATE_EXCEL_FILES:
-        workbook, worksheet, next_row = gen_excel_file(FORM_1322_FILE_NAME, header_list, values_list, close_workbook=False)
+        workbook, worksheet, next_row = gen_excel_file(FORM_1322_FILE_NAME, header_list, values_list,
+                                                       DIVIDENDS_FILE_DESCRIPTION, close_workbook=False)
         #rows = ('total_usd: {total_usd}\ttotal_ils: {total_ils}\ttotal_ils_deducted: {total_ils_deducted}')
-        next_row = write_row(worksheet, next_row, ['Total', '', total_usd, '', total_ils, total_ils_deducted])
+        next_row = write_row(worksheet, next_row, ['Total', '', total_usd, '', total_ils, total_ils_deducted], workbook,
+                             highlighted_cols=[4, 5])
         close_workbook(workbook)
 
 def print_interests_appendix(interests):
@@ -776,9 +792,10 @@ def print_interests_appendix(interests):
     print(f'total_usd: {total_usd}\ttotal_ils: {total_ils}')
 
     if GENERATE_EXCEL_FILES:
-        workbook, worksheet, next_row = gen_excel_file(INTERESTS_FILE_NAME, header_list, values_list, close_workbook=False)
+        workbook, worksheet, next_row = gen_excel_file(INTERESTS_FILE_NAME, header_list, values_list,
+                                                       INTEREST_FILE_DESCRIPTION, close_workbook=False)
         #rows = ('total_usd: {total_usd}\ttotal_ils: {total_ils}\ttotal_ils_deducted: {total_ils_deducted}')
-        next_row = write_row(worksheet, next_row, ['Total', total_usd, total_ils])
+        next_row = write_row(worksheet, next_row, ['Total', total_usd, total_ils], workbook, highlighted_cols=[2])
         close_workbook(workbook)
 
 def create_gen_dir():
@@ -841,10 +858,7 @@ def main():
     print(f'stock splits: {stock_splits}')
     form1325 = form1325_obj_create(trade_dic, dollar_ils_rate, stock_splits)
     dividends = Dividends(dividends_list, dollar_ils_rate)
-    print_interests_appendix(interests)
-    print_form1325_list(form1325)
-    print_form1322_appendix_list(dividends)
-    print_broker_form1099_retrieval_instructions()
+
 
     if GENERATE_EXCEL_FILES:
         print(f"\nCheck the '{GENERATED_FILES_DIR}' directory for the generated Excel files")
@@ -884,5 +898,9 @@ def main():
 
     generate_form1324_pdf(FORM_1324_TEMPLATE_PDF, FORM_1324_OUTPUT_PDF, form1325, dividends, dividends_and_interest_profits_including_deduction)
 
+    print_interests_appendix(interests)
+    print_form1325_list(form1325, form1325_1st_half, form1325_2nd_half, dividends, interests, loss_remaining_from_stock)
+    print_form1322_appendix_list(dividends)
+    print_broker_form1099_retrieval_instructions()
     print(f'Total loss from previous year remaining for the next tax year: {loss_remaining_from_prev }')
     print(f'Total loss from stock remaining for the next tax year: {loss_remaining_from_stock}')

@@ -11,6 +11,10 @@
     "description": "Teudat zehut",
     "value": "000000000"
   },
+  "phone-number": {
+    "description": "Phone Number",
+    "value": "000000000"
+  },
   "date": {
     "description": "Filing date",
     "value": "1/1/2020"
